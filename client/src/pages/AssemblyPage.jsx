@@ -446,6 +446,8 @@ export default function AssemblyPage() {
             }
           : undefined,
       });
+      // Init visualizer AFTER WebRTC is established to avoid AudioContext conflict
+      await init();
       setAgentActive(true);
       setTranscript((t) => [
         ...t,

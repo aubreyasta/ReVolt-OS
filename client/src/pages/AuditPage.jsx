@@ -54,8 +54,8 @@ export default function AuditPage() {
   }
 
   async function submit() {
-    if (!image || !csv) {
-      setError("Both files required.");
+    if (!csv) {
+      setError("CSV file required.");
       return;
     }
     setError(null);
@@ -77,7 +77,7 @@ export default function AuditPage() {
 
     try {
       const form = new FormData();
-      form.append("image", image);
+      if (image) form.append("image", image);
       form.append("csv_file", csv);
       const res = await fetch("/api/audit", { method: "POST", body: form });
       clearTimeout(t1);
@@ -99,7 +99,7 @@ export default function AuditPage() {
   }
 
   const busy = step > 0;
-  const ready = image && csv;
+  const ready = !!csv;
 
   return (
     <div style={S.desktop}>
