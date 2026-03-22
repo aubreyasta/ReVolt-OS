@@ -810,50 +810,23 @@ function PageHeader({ manifest, navigate, blueprint }) {
   const certified = (manifest?.status ?? "").includes("Certified");
   return (
     <div style={S.header}>
+      <button className="aqua-btn" onClick={() => navigate("/")}>← Overview</button>
       <div style={S.logo}>ReVolt OS</div>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 20, fontWeight: 600 }}>Upcycle Blueprint</div>
-        <div
-          style={{
-            fontSize: 12,
-            color: "#94a3b8",
-            marginTop: 2,
-            fontFamily: "monospace",
-          }}
-        >
-          {manifest?.battery_id} · {manifest?.manufacturer?.name ?? "Unknown"} ·{" "}
-          {manifest?.health_grade}
+        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>Upcycle Blueprint</div>
+        <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2, fontFamily: "var(--font-mono)" }}>
+          {manifest?.battery_id} · {manifest?.manufacturer?.name ?? "Unknown"} · {manifest?.health_grade}
         </div>
       </div>
       {blueprint && (
-        <div
-          style={{ fontSize: 11, fontFamily: "monospace", color: "#64748b" }}
-        >
-          {blueprint.upcycle_steps?.length ?? 0} steps ·{" "}
-          {blueprint.estimated_total_time_hours ?? 0}h ·{" "}
-          {blueprint.difficulty_level}
+        <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-dim)" }}>
+          {blueprint.upcycle_steps?.length ?? 0} steps · {blueprint.estimated_total_time_hours ?? 0}h · {blueprint.difficulty_level}
         </div>
       )}
-      <div
-        style={{
-          fontSize: 12,
-          fontWeight: "bold",
-          padding: "4px 12px",
-          borderRadius: 4,
-          background: certified ? "rgba(34,197,94,.12)" : "rgba(239,68,68,.12)",
-          color: certified ? "#22c55e" : "#ef4444",
-          border: `1px solid ${certified ? "rgba(34,197,94,.3)" : "rgba(239,68,68,.3)"}`,
-        }}
-      >
+      <div style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: "var(--radius-sm)", background: certified ? "rgba(30,132,73,0.1)" : "rgba(192,57,43,0.1)", color: certified ? "var(--green)" : "var(--red)", border: `1px solid ${certified ? "rgba(30,132,73,0.3)" : "rgba(192,57,43,0.3)"}` }}>
         {certified ? "CERTIFIED" : "REJECTED"}
       </div>
-      <button
-        className="aqua-btn"
-        style={{ marginLeft: 8 }}
-        onClick={() => navigate(-1)}
-      >
-        Passport
-      </button>
+      <button className="aqua-btn" style={{ marginLeft: 6 }} onClick={() => navigate(-1)}>Passport</button>
     </div>
   );
 }
@@ -867,10 +840,10 @@ function Sect({ title, children }) {
           fontWeight: 600,
           letterSpacing: "1.5px",
           textTransform: "uppercase",
-          color: "#64748b",
+          color: "#6a7d8f",
           marginBottom: 12,
           paddingBottom: 8,
-          borderBottom: "1px solid rgba(148,163,184,.1)",
+          borderBottom: "1px solid rgba(138,155,176,0.1)",
         }}
       >
         {title}
@@ -886,7 +859,7 @@ function StatBox({ label, value, color, small }) {
       <div
         style={{
           fontSize: 10,
-          color: "#64748b",
+          color: "#6a7d8f",
           textTransform: "uppercase",
           letterSpacing: ".5px",
           marginBottom: 4,
@@ -899,7 +872,7 @@ function StatBox({ label, value, color, small }) {
           fontSize: small ? 12 : 20,
           fontWeight: 600,
           fontFamily: "monospace",
-          color: color ?? "#e2e8f0",
+          color: color ?? "#c8d0dc",
           wordBreak: "break-word",
           lineHeight: 1.3,
         }}
@@ -916,9 +889,9 @@ function StatBox({ label, value, color, small }) {
 const S = {
   desktop: {
     minHeight: "100vh",
-    background: "#0a0e17",
-    color: "#e2e8f0",
-    fontFamily: "system-ui, sans-serif",
+    background: "#0e1420",
+    color: "#c8d0dc",
+    fontFamily: "var(--font-ui)",
     display: "flex",
     flexDirection: "column",
   },
@@ -929,70 +902,70 @@ const S = {
     justifyContent: "center",
   },
   errorBox: {
-    background: "#151d2e",
-    border: "1px solid rgba(148,163,184,.15)",
-    borderRadius: 10,
+    background: "#1a2332",
+    border: "1px solid rgba(138,155,176,0.2)",
+    borderRadius: "var(--radius-lg)",
     padding: 24,
     textAlign: "center",
   },
   rejectedBox: {
-    background: "#151d2e",
-    border: "1px solid rgba(239,68,68,.3)",
-    borderRadius: 10,
+    background: "#1a2332",
+    border: "1px solid rgba(192,57,43,0.3)",
+    borderRadius: "var(--radius-lg)",
     padding: 32,
     textAlign: "center",
     maxWidth: 480,
   },
   rejectionReason: {
-    fontSize: 12,
-    color: "#fca5a5",
-    background: "rgba(239,68,68,0.1)",
-    border: "1px solid rgba(239,68,68,0.2)",
+    fontSize: 11,
+    color: "#e0908a",
+    background: "rgba(192,57,43,0.1)",
+    border: "1px solid rgba(192,57,43,0.2)",
     padding: "6px 12px",
-    borderRadius: 4,
+    borderRadius: "var(--radius-sm)",
     marginBottom: 4,
   },
   header: {
-    padding: "14px 24px",
-    borderBottom: "1px solid rgba(148,163,184,.15)",
+    padding: "12px 20px",
+    borderBottom: "1px solid rgba(138,155,176,0.2)",
     display: "flex",
     alignItems: "center",
-    gap: 14,
-    background: "#0d1117",
+    gap: 12,
+    background: "rgba(220,227,236,0.85)",
     flexWrap: "wrap",
   },
   logo: {
-    fontSize: 12,
-    fontWeight: 600,
-    letterSpacing: 2,
-    color: "#22d3ee",
-    background: "rgba(34,211,238,.08)",
-    padding: "5px 10px",
-    borderRadius: 6,
-    border: "1px solid rgba(34,211,238,.2)",
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: 1.5,
+    color: "var(--aqua-blue)",
+    background: "rgba(40,96,160,0.08)",
+    padding: "4px 10px",
+    borderRadius: "var(--radius-sm)",
+    border: "1px solid rgba(40,96,160,0.2)",
     whiteSpace: "nowrap",
   },
-  layout: { display: "grid", gridTemplateColumns: "1fr 320px", flex: 1 },
-  main: { padding: "24px 28px", overflowY: "auto" },
-  sidebar: { borderLeft: "1px solid rgba(148,163,184,.15)", overflowY: "auto" },
+  layout: { display: "grid", gridTemplateColumns: "1fr 300px", flex: 1 },
+  main: { padding: "22px 26px", overflowY: "auto" },
+  sidebar: { borderLeft: "1px solid rgba(138,155,176,0.15)", overflowY: "auto" },
   targetGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(4, 1fr)",
-    gap: 16,
-    background: "#151d2e",
-    border: "1px solid rgba(148,163,184,.15)",
-    borderRadius: 10,
-    padding: 20,
+    gap: 14,
+    background: "#1a2332",
+    border: "1px solid rgba(138,155,176,0.15)",
+    borderRadius: "var(--radius-lg)",
+    padding: 18,
     marginBottom: 0,
   },
   topologyExplain: {
-    marginTop: 14,
-    padding: "12px 16px",
-    background: "rgba(34,211,238,.04)",
-    borderLeft: "2px solid #22d3ee",
-    borderRadius: "0 6px 6px 0",
-    fontSize: 13,
-    color: "#94a3b8",
+    marginTop: 12,
+    padding: "10px 14px",
+    background: "rgba(40,96,160,0.06)",
+    borderLeft: "2px solid var(--aqua-blue)",
+    borderRadius: "0 var(--radius-sm) var(--radius-sm) 0",
+    fontSize: 12,
+    color: "#8a9bb0",
     lineHeight: 1.7,
   },
   modulesGrid: {
@@ -1001,16 +974,16 @@ const S = {
     gap: 8,
   },
   modCard: {
-    background: "#151d2e",
-    border: "1px solid rgba(148,163,184,.15)",
+    background: "#1a2332",
+    border: "1px solid rgba(138,155,176,0.15)",
     borderLeft: "3px solid",
-    borderRadius: 8,
+    borderRadius: "var(--radius)",
     padding: 12,
   },
   stepCard: {
-    background: "#151d2e",
+    background: "#1a2332",
     border: "1px solid",
-    borderRadius: 10,
+    borderRadius: "var(--radius)",
     marginBottom: 8,
     overflow: "hidden",
     transition: "border-color .2s",
@@ -1025,57 +998,57 @@ const S = {
   stepNum: {
     width: 28,
     height: 28,
-    borderRadius: 6,
+    borderRadius: "var(--radius-sm)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     fontSize: 12,
     fontWeight: 600,
-    fontFamily: "monospace",
+    fontFamily: "var(--font-mono)",
     flexShrink: 0,
   },
   metaReading: {
-    fontSize: 12,
-    padding: "7px 10px",
-    borderRadius: 6,
+    fontSize: 11,
+    padding: "6px 10px",
+    borderRadius: "var(--radius-sm)",
     lineHeight: 1.5,
     marginBottom: 6,
-    background: "rgba(59,130,246,.1)",
-    color: "#93c5fd",
-    border: "1px solid rgba(59,130,246,.2)",
+    background: "rgba(40,96,160,0.1)",
+    color: "#7aa3cc",
+    border: "1px solid rgba(40,96,160,0.2)",
   },
   metaWarning: {
-    fontSize: 12,
-    padding: "7px 10px",
-    borderRadius: 6,
+    fontSize: 11,
+    padding: "6px 10px",
+    borderRadius: "var(--radius-sm)",
     lineHeight: 1.5,
     marginBottom: 6,
-    background: "rgba(239,68,68,.1)",
-    color: "#fca5a5",
-    border: "1px solid rgba(239,68,68,.2)",
+    background: "rgba(192,57,43,0.1)",
+    color: "#e0908a",
+    border: "1px solid rgba(192,57,43,0.2)",
   },
   metaVoice: {
-    fontSize: 12,
-    padding: "7px 10px",
-    borderRadius: 6,
+    fontSize: 11,
+    padding: "6px 10px",
+    borderRadius: "var(--radius-sm)",
     lineHeight: 1.5,
     marginBottom: 6,
-    background: "rgba(167,139,250,.08)",
-    color: "#c4b5fd",
-    border: "1px solid rgba(167,139,250,.2)",
+    background: "rgba(124,58,237,0.08)",
+    color: "#b4a0e0",
+    border: "1px solid rgba(124,58,237,0.2)",
   },
   td: {
     padding: 8,
-    color: "#94a3b8",
-    borderBottom: "1px solid rgba(148,163,184,.1)",
+    color: "#8a9bb0",
+    borderBottom: "1px solid rgba(138,155,176,0.1)",
     lineHeight: 1.4,
   },
-  sideSection: { padding: 16, borderBottom: "1px solid rgba(148,163,184,.15)" },
-  sideTitle: { fontSize: 13, fontWeight: 600, marginBottom: 10 },
+  sideSection: { padding: 14, borderBottom: "1px solid rgba(138,155,176,0.15)" },
+  sideTitle: { fontSize: 12, fontWeight: 700, marginBottom: 10 },
   listItem: {
     paddingBottom: 10,
     marginBottom: 10,
-    borderBottom: "1px solid rgba(148,163,184,.1)",
+    borderBottom: "1px solid rgba(138,155,176,0.1)",
     display: "flex",
     flexDirection: "column",
     gap: 2,
