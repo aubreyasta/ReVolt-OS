@@ -553,6 +553,9 @@ export default function AssemblyPage() {
           </div>
 
           <div style={S.toolbar}>
+            <button className="aqua-btn" onClick={() => navigate("/")}>
+              ← Overview
+            </button>
             <button className="aqua-btn" onClick={() => navigate(-1)}>
               Passport
             </button>
@@ -881,37 +884,38 @@ export default function AssemblyPage() {
 const S = {
   desktop: {
     minHeight: "100vh",
-    background:
-      "linear-gradient(135deg, #5578aa 0%, #7a9cc8 50%, #4a6899 100%)",
+    background: "var(--desktop)",
     display: "flex",
     flexDirection: "column",
+    fontFamily: "var(--font-ui)",
   },
   windowWrap: {
     flex: 1,
     display: "flex",
     alignItems: "flex-start",
     justifyContent: "center",
-    padding: "16px 12px 4px",
+    padding: "24px 16px",
   },
   window: { width: "100%", maxWidth: 960 },
   toolbar: {
     display: "flex",
     alignItems: "center",
     gap: 6,
-    padding: "4px 8px",
-    background: "rgba(210,225,245,0.8)",
+    padding: "5px 10px",
+    background: "rgba(220,227,236,0.85)",
+    borderBottom: "1px solid rgba(138,155,176,0.3)",
   },
   body: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
-    gap: 8,
-    padding: 10,
+    gap: 10,
+    padding: 12,
   },
   leftCol: { display: "flex", flexDirection: "column", gap: 8 },
   rightCol: { display: "flex", flexDirection: "column", gap: 8 },
   colHeader: {
     fontSize: 9,
-    fontWeight: "bold",
+    fontWeight: 700,
     color: "var(--text-dim)",
     letterSpacing: "0.14em",
     marginBottom: 2,
@@ -919,31 +923,32 @@ const S = {
   statusBar: {
     display: "flex",
     justifyContent: "space-between",
-    padding: "4px 10px",
-    background: "rgba(200,215,235,0.8)",
+    padding: "5px 12px",
+    background: "rgba(220,227,236,0.85)",
     fontSize: 10,
     color: "var(--text-dim)",
+    borderTop: "1px solid rgba(138,155,176,0.2)",
   },
   taskbar: {
-    background: "linear-gradient(180deg, #3a6aaa 0%, #1a4a88 100%)",
-    borderTop: "1px solid #6090cc",
-    padding: "4px 10px",
+    background: "linear-gradient(180deg, #4a6a8a 0%, #2a4a6a 100%)",
+    borderTop: "1px solid rgba(138,155,176,0.3)",
+    padding: "5px 12px",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    boxShadow: "0 -2px 8px rgba(0,0,0,0.4)",
+    boxShadow: "0 -2px 8px rgba(0,0,0,0.15)",
   },
   pill: {
     display: "flex",
     alignItems: "center",
     gap: 4,
     fontSize: 9,
-    fontWeight: "bold",
+    fontWeight: 600,
     color: "var(--text-dim)",
     letterSpacing: "0.05em",
-    background: "rgba(255,255,255,0.28)",
-    border: "1px solid rgba(100,140,200,0.4)",
-    borderRadius: 2,
+    background: "rgba(255,255,255,0.35)",
+    border: "1px solid rgba(138,155,176,0.3)",
+    borderRadius: "var(--radius-sm)",
     padding: "2px 6px",
   },
 };
