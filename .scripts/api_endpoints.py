@@ -890,36 +890,32 @@ def run_audit_endpoint():
     image_file = request.files.get("image")
     csv_file   = request.files.get("csv_file")
 
-    if not image_file or not csv_file:
-        return jsonify({"error": "Both image and csv_file required"}), 400
+    if not csv_file:
+        return jsonify({"error": "csv_file is required"}), 400
 
-    # Save uploads to temp files
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as img_tmp:
-        image_file.save(img_tmp.name)
-        img_path = img_tmp.name
+    img_path = None
+    if image_file:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as img_tmp:
+            image_file.save(img_tmp.name)
+            img_path = img_tmp.name
 
     with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as csv_tmp:
         csv_file.save(csv_tmp.name)
         csv_path = csv_tmp.name
 
     try:
-        # Run the full Gemini pipeline
         digital_twin = build_digital_twin(csv_path, img_path)
-
-        # Save to MongoDB
         collection.update_one(
             {"battery_id": digital_twin["battery_id"]},
             {"$set": digital_twin},
             upsert=True
         )
-
-        # Strip embedding before sending to frontend (too large)
         digital_twin.pop("behavior_embedding", None)
         return jsonify(serialize_doc(digital_twin)), 201
 
     finally:
-        # Clean up temp files
-        os.unlink(img_path)
+        if img_path:
+            os.unlink(img_path)
         os.unlink(csv_path)
 
 
