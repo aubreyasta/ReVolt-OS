@@ -359,22 +359,19 @@ export default function AssemblyPage() {
   const stableFreq = useCallback(() => freqRef.current(), []);
 
   // Fetch agent ID from backend on mount.
-  // Requires GET /api/config in api_endpoints.py returning { elevenlabs_agent_id: "..." }
   useEffect(() => {
     fetch("/api/config")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.elevenlabs_agent_id) setAgentId(data.elevenlabs_agent_id);
       })
-      .catch(() => {
-        /* backend not live -- stays in demo mode */
-      });
+      .catch(() => {});
   }, []);
 
   // ElevenLabs Conversational AI hook.
-  // Handles mic capture, agent audio playback, and tool call callbacks.
-  // Only active when agentId is set (fetched from backend config above).
+  // micMuted: true = mic is muted (default). Only unmuted while pressing.
   const conversation = useConversation({
+    micMuted: !pressing,
     clientTools: {
       log_milestone: ({ step_index, step_label }) => {
         setDone((prev) => new Set([...prev, step_index]));
