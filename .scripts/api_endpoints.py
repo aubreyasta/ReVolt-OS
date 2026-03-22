@@ -47,6 +47,7 @@ load_dotenv()
 # Create the Flask app
 # Think of this as creating the "restaurant" that will serve our API
 app = Flask(__name__)
+CORS(app)
 
 # CORS = Cross-Origin Resource Sharing
 # This allows Person 4's React frontend (running on localhost:3000)
@@ -882,85 +883,44 @@ def get_battery_blueprint(battery_id):
 # ============================================
 @app.route("/api/audit", methods=["POST"])
 def run_audit_endpoint():
-    """
-    Run the full Gemini audit pipeline from the frontend.
+    import tempfile, os, sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from audit import build_digital_twin
 
-    WHO USES THIS:
-      Person 4 (React) → AuditPage.jsx sends a multipart form with:
-        - image:    the battery sticker photo (JPG/PNG)
-        - csv_file: the telemetry CSV
-
-    WHAT IT DOES:
-      1. Saves the uploaded files to a temp directory
-      2. Imports and runs the full audit pipeline from audit.py
-      3. Returns the complete Digital Twin manifest as JSON
-
-    RETURNS:
-      The full Digital Twin document (same as manifest.json), including
-      the upcycle_blueprint if the battery passes the audit gate.
-    """
-    import tempfile
-    import importlib.util
-
-    # Validate uploads
-    if "csv_file" not in request.files:
-        return jsonify({"error": "csv_file is required"}), 400
-
-    csv_file = request.files["csv_file"]
     image_file = request.files.get("image")
+    csv_file   = request.files.get("csv_file")
 
-    # Save to temp files
-    tmp_dir = tempfile.mkdtemp()
-    csv_path = os.path.join(tmp_dir, csv_file.filename or "telemetry.csv")
-    csv_file.save(csv_path)
+    if not image_file or not csv_file:
+        return jsonify({"error": "Both image and csv_file required"}), 400
 
-    image_path = None
-    if image_file and image_file.filename:
-        image_path = os.path.join(tmp_dir, image_file.filename)
-        image_file.save(image_path)
+    # Save uploads to temp files
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as img_tmp:
+        image_file.save(img_tmp.name)
+        img_path = img_tmp.name
+
+    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as csv_tmp:
+        csv_file.save(csv_tmp.name)
+        csv_path = csv_tmp.name
 
     try:
-        # Import audit.py dynamically (it lives in .scripts/)
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        audit_path = os.path.join(script_dir, "audit.py")
+        # Run the full Gemini pipeline
+        digital_twin = build_digital_twin(csv_path, img_path)
 
-        spec = importlib.util.spec_from_file_location("audit_module", audit_path)
-        audit_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(audit_module)
+        # Save to MongoDB
+        collection.update_one(
+            {"battery_id": digital_twin["battery_id"]},
+            {"$set": digital_twin},
+            upsert=True
+        )
 
-        # Run the full pipeline
-        digital_twin = audit_module.build_digital_twin(csv_path, image_path)
-
-        # Save manifest locally
-        audit_module.save_manifest(digital_twin)
-
-        # Push to MongoDB via our own create endpoint
-        audit_module.push_to_api(digital_twin)
-
-        # Generate PDF passport
-        pdf_path = audit_module.generate_passport_pdf(digital_twin)
-
-        # Upload to ElevenLabs if configured
-        audit_module.upload_to_elevenlabs(pdf_path, digital_twin["battery_id"])
-
-        # Return the full manifest to the frontend
-        # Remove the embedding (it's huge and the frontend doesn't need it)
-        response_data = {k: v for k, v in digital_twin.items() if k != "behavior_embedding"}
-
-        # The frontend expects passport_id at the top level for navigation
-        response_data["passport_id"] = digital_twin["battery_id"]
-
-        return jsonify(response_data)
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        # Strip embedding before sending to frontend (too large)
+        digital_twin.pop("behavior_embedding", None)
+        return jsonify(serialize_doc(digital_twin)), 201
 
     finally:
         # Clean up temp files
-        import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        os.unlink(img_path)
+        os.unlink(csv_path)
 
 
 # ============================================
