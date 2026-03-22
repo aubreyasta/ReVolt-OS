@@ -1,7 +1,4 @@
-/* =============================================================================
-   App.jsx -- Root router (updated with LandingPage as home)
-   ============================================================================= */
-
+/* App.jsx -- Root router (landing page at /) */
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import LandingPage from "./pages/LandingPage";
 import AuditPage from "./pages/AuditPage";
