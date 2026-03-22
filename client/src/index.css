@@ -1,0 +1,237 @@
+/* =============================================================================
+   ReVolt OS -- Global Styles
+   Theme: macOS Aqua / Y2K industrial (2001-era OS chrome)
+   This file must be imported in main.jsx as the first import.
+   Tailwind is included for utility classes but the design
+   is primarily driven by the CSS variables and classes below.
+   ============================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;700&family=Tahoma:wght@400;700&display=swap');
+@import "tailwindcss";
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* -----------------------------------------------------------------------------
+   CSS Variables
+   All colours, shadows, and fonts are defined here.
+   Components reference these via var(--name) so the theme is easy to change.
+   ----------------------------------------------------------------------------- */
+:root {
+  --bg:          #c8d4e8;
+  --desktop:     #6b8cba;
+  --win-bg:      rgba(200, 212, 232, 0.92);
+  --win-border:  #7a9cc8;
+
+  /* Titlebar gradients -- Aqua blue pill style */
+  --titlebar:    linear-gradient(180deg, #4a7fc1 0%, #2a5fa0 40%, #1e4f8a 100%);
+  --titlebar-h:  linear-gradient(180deg, #6a9fd8 0%, #4a7fc1 40%, #3060a8 100%);
+
+  /* Button gradients */
+  --btn:         linear-gradient(180deg, #e8eff8 0%, #c8d8f0 50%, #a8c0e8 100%);
+  --btn-press:   linear-gradient(180deg, #a8c0e8 0%, #c8d8f0 100%);
+  --btn-border:  #6090c0;
+
+  --aqua-blue:   #4a9fd8;
+  --aqua-glow:   rgba(74,159,216,0.4);
+
+  /* Text colours */
+  --text:        #0a1a2e;
+  --text-dim:    #3a5a7e;
+
+  /* Status colours */
+  --green:       #00cc44;
+  --amber:       #ff9900;
+  --red:         #dd2222;
+
+  /* Shadow utilities */
+  --inset:  inset 2px 2px 4px rgba(0,0,0,0.25), inset -1px -1px 2px rgba(255,255,255,0.6);
+  --raise:  2px 2px 0px rgba(0,0,0,0.4), -1px -1px 0px rgba(255,255,255,0.8);
+
+  --font-ui:   'Tahoma', 'Geneva', sans-serif;
+  --font-mono: 'Courier New', monospace;
+}
+
+html, body, #root {
+  width: 100%;
+  min-height: 100vh;
+  background: var(--desktop);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text);
+}
+
+button { cursor: pointer; font-family: var(--font-ui); font-size: 12px; }
+input  { font-family: var(--font-ui); font-size: 12px; }
+
+/* -----------------------------------------------------------------------------
+   .aqua-btn
+   Standard bevelled button used everywhere in the app.
+   Add class "primary" for the blue filled variant.
+   ----------------------------------------------------------------------------- */
+.aqua-btn {
+  background: var(--btn);
+  border: 1px solid var(--btn-border);
+  border-bottom-color: #3070a0;
+  border-right-color: #4080b0;
+  box-shadow: var(--raise);
+  padding: 4px 14px;
+  color: var(--text);
+  border-radius: 3px;
+  font-weight: bold;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  transition: filter 0.1s;
+  white-space: nowrap;
+}
+.aqua-btn:active {
+  background: var(--btn-press);
+  box-shadow: var(--inset);
+  transform: translateY(1px);
+}
+.aqua-btn.primary {
+  background: linear-gradient(180deg, #5ab0f0 0%, #2a80d0 40%, #1060b0 100%);
+  border-color: #1050a0;
+  color: #fff;
+}
+.aqua-btn.primary:active {
+  background: linear-gradient(180deg, #1060b0 0%, #2a80d0 100%);
+}
+.aqua-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* -----------------------------------------------------------------------------
+   .window
+   The outer container for every page's main content area.
+   Gives the OS window chrome appearance.
+   ----------------------------------------------------------------------------- */
+.window {
+  background: var(--win-bg);
+  border: 1px solid var(--win-border);
+  border-radius: 6px 6px 4px 4px;
+  box-shadow: 3px 3px 12px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.7);
+  overflow: hidden;
+}
+
+/* -----------------------------------------------------------------------------
+   .titlebar
+   The blue gradient bar at the top of each window.
+   Contains traffic lights + centred title text.
+   ----------------------------------------------------------------------------- */
+.titlebar {
+  background: var(--titlebar);
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.titlebar-title {
+  color: #fff;
+  font-size: 11px;
+  font-weight: bold;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  flex: 1;
+  text-align: center;
+  letter-spacing: 0.03em;
+}
+
+/* -----------------------------------------------------------------------------
+   .traffic-lights / .tl
+   macOS-style close/min/max dots in the titlebar.
+   The "close" dot on PassportPage and AssemblyPage calls navigate(-1)
+   via an onClick -- see those files.
+   ----------------------------------------------------------------------------- */
+.traffic-lights { display: flex; gap: 4px; }
+.tl {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+}
+.tl.close { background: radial-gradient(circle at 40% 35%, #ff8080, #cc0000); }
+.tl.min   { background: radial-gradient(circle at 40% 35%, #ffee80, #cc9900); }
+.tl.max   { background: radial-gradient(circle at 40% 35%, #80ee80, #009900); }
+
+/* -----------------------------------------------------------------------------
+   .inset-panel
+   Recessed content area -- used for data panels, drop zones, transcripts.
+   Gives the appearance of a sunken region in the window.
+   ----------------------------------------------------------------------------- */
+.inset-panel {
+  background: rgba(255,255,255,0.45);
+  border: 1px solid rgba(100,140,200,0.5);
+  border-top-color: rgba(0,0,60,0.2);
+  border-left-color: rgba(0,0,60,0.2);
+  box-shadow: var(--inset);
+  border-radius: 2px;
+  padding: 8px;
+}
+
+/* -----------------------------------------------------------------------------
+   .lcd
+   Green-on-black LCD readout style.
+   Used for passport IDs, battery identity strings, config codes.
+   ----------------------------------------------------------------------------- */
+.lcd {
+  background: #0a1a08;
+  color: #00ff44;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 8px;
+  border: 1px solid #003310;
+  box-shadow: inset 2px 2px 6px rgba(0,0,0,0.8);
+  letter-spacing: 0.05em;
+}
+
+/* -----------------------------------------------------------------------------
+   .led
+   Physical indicator LED.
+   Usage: <div class="led green" /> | amber | red | gray
+   The blinking animation is applied inline via style={{ animation: "blink ..." }}
+   ----------------------------------------------------------------------------- */
+.led {
+  width: 10px; height: 10px; border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.4);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+.led.green { background: radial-gradient(circle at 40% 35%, #88ff88, #00aa22); box-shadow: 0 0 6px #00ff44, inset 0 1px 0 rgba(255,255,255,0.4); }
+.led.amber { background: radial-gradient(circle at 40% 35%, #ffdd88, #cc7700); box-shadow: 0 0 6px #ffaa00, inset 0 1px 0 rgba(255,255,255,0.4); }
+.led.red   { background: radial-gradient(circle at 40% 35%, #ff8888, #cc0000); box-shadow: 0 0 6px #ff2222, inset 0 1px 0 rgba(255,255,255,0.4); }
+.led.gray  { background: radial-gradient(circle at 40% 35%, #cccccc, #888888); }
+
+/* -----------------------------------------------------------------------------
+   .progress-track / .progress-fill
+   LCD-style progress bar. Fill width is set inline as a percentage.
+   Used on AuditPage loading state and AssemblyPage checklist progress.
+   ----------------------------------------------------------------------------- */
+.progress-track {
+  background: #0a1a08;
+  border: 1px solid #334;
+  box-shadow: var(--inset);
+  height: 14px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(180deg, #44ff88 0%, #00cc44 50%, #008822 100%);
+  box-shadow: 0 0 8px rgba(0,255,68,0.5);
+  transition: width 0.5s ease;
+}
+
+/* -----------------------------------------------------------------------------
+   .divider
+   Subtle horizontal rule between sections inside a panel or card.
+   ----------------------------------------------------------------------------- */
+.divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0,0,60,0.2) 20%, rgba(0,0,60,0.2) 80%, transparent);
+  margin: 6px 0;
+}
+
+/* -----------------------------------------------------------------------------
+   Keyframe animations
+   blink -- used on active LEDs (agent status, thermal warning)
+   scan  -- reserved for future use (scan line effect)
+   ----------------------------------------------------------------------------- */
+@keyframes blink { 0%,100%{ opacity:1 } 50%{ opacity:0 } }
+@keyframes scan  { 0%{ transform:translateY(-100%) } 100%{ transform:translateY(400%) } }
