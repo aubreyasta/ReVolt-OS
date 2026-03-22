@@ -446,7 +446,6 @@ export default function AssemblyPage() {
             }
           : undefined,
       });
-      await init(); // visualizer only -- SDK handles actual mic
       setAgentActive(true);
       setTranscript((t) => [
         ...t,

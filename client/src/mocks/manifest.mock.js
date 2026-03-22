@@ -24,41 +24,42 @@
 export const MOCK_MANIFEST = {
   // --- Identity ---
   battery_id: "RVX-2024-00001",
-  status:     "Certified",   // One of: Listed | Under Review | Certified | Sold | Disassembly Started
+  status: "Certified", // One of: Listed | Under Review | Certified | Sold | Disassembly Started
 
   // --- Manufacturer (populated by Gemini Vision in audit.py) ---
   manufacturer: {
-    name:                 "CATL",
-    model:                "NMC811-72Ah",
-    chemistry:            "NMC",
-    nominal_voltage:      3.7,
+    name: "CATL",
+    model: "NMC811-72Ah",
+    chemistry: "NMC",
+    nominal_voltage: 3.7,
     nominal_capacity_kwh: 75.0,
-    manufacture_date:     "2021-03-15",
+    manufacture_date: "2021-03-15",
   },
 
   // --- Health (populated by Gemini telemetry audit in audit.py) ---
   health_grade: "A",
   health_details: {
-    state_of_health_pct:        91.2,
+    state_of_health_pct: 91.2,
     remaining_useful_life_years: 6.5,
-    total_cycles:               580,
-    peak_temp_recorded_c:       38.4,
-    avg_discharge_rate_c:       0.5,
-    physical_condition:         "Excellent -- no visible damage",
-    gemini_analysis_summary:    "High-quality NMC pack from temperate climate. Low cycle count with conservative discharge history. Ideal for residential solar storage.",
-    audit_timestamp:            "2026-03-21T00:00:00Z",
+    total_cycles: 580,
+    peak_temp_recorded_c: 38.4,
+    avg_discharge_rate_c: 0.5,
+    physical_condition: "Excellent -- no visible damage",
+    gemini_analysis_summary:
+      "High-quality NMC pack from temperate climate. Low cycle count with conservative discharge history. Ideal for residential solar storage.",
+    audit_timestamp: "2026-03-21T00:00:00Z",
   },
 
   // --- Telemetry summary (stats from the CSV, not the raw rows) ---
   telemetry_summary: {
-    voltage_min:          3.0,
-    voltage_max:          4.2,
-    voltage_mean:         3.72,
-    temp_min_c:           5.0,
-    temp_max_c:           38.4,
-    temp_mean_c:          22.1,
-    capacity_fade_pct:    8.8,
-    data_points_count:    5200,
+    voltage_min: 3.0,
+    voltage_max: 4.2,
+    voltage_mean: 3.72,
+    temp_min_c: 5.0,
+    temp_max_c: 38.4,
+    temp_mean_c: 22.1,
+    capacity_fade_pct: 8.8,
+    data_points_count: 5200,
     discharge_curve_shape: "Linear",
   },
 
@@ -73,32 +74,33 @@ export const MOCK_MANIFEST = {
   //   Not Started -> Inspection -> Discharging -> Module Separation -> Reassembly -> Complete
   // compliance_log is appended to each time the voice agent or technician confirms a step.
   safety_workflow: {
-    current_state:  "Not Started",
-    technician_id:  null,
-    target_config:  "4S2P 48V Solar Stack",
-    started_at:     null,
-    completed_at:   null,
+    current_state: "Not Started",
+    technician_id: null,
+    target_config: "4S2P 48V Solar Stack",
+    started_at: null,
+    completed_at: null,
     compliance_log: [],
   },
 
   // --- Audit manifest (the Battery Passport core document) ---
   audit_manifest: {
-    version:         "1.0",
-    generated_by:    "Gemini (gemini-3-flash-preview)",
-    passport_id:     "RVX-2024-00001",
-    grade:           "A",
+    version: "1.0",
+    generated_by: "Gemini (gemini-3-flash-preview)",
+    passport_id: "RVX-2024-00001",
+    grade: "A",
     recommended_use: ["Residential solar storage", "Light EV conversion"],
-    warnings:        [],
-    eu_compliant:    true,
+    warnings: [],
+    eu_compliant: true,
     audit_timestamp: "2026-03-21T00:00:00Z",
   },
 
   // --- Listing (marketplace display) ---
   listing: {
-    title:            "Premium 75kWh NMC Pack -- Grade A -- Low Cycles",
-    description:      "Verified CATL NMC811 pack from a gently-used Model 3. Only 580 cycles, 91% SOH.",
-    asking_price_usd: 8500.00,
-    seller_id:        "seller-001",
+    title: "Premium 75kWh NMC Pack -- Grade A -- Low Cycles",
+    description:
+      "Verified CATL NMC811 pack from a gently-used Model 3. Only 580 cycles, 91% SOH.",
+    asking_price_usd: 8500.0,
+    seller_id: "seller-001",
   },
 
   created_at: "2026-03-21T00:00:00Z",
@@ -106,4 +108,4 @@ export const MOCK_MANIFEST = {
 };
 
 // Flip to false once the backend is running and POST /api/audit is live.
-export const USE_MOCK = true;
+export const USE_MOCK = false;
