@@ -394,6 +394,166 @@ def compare_against_failures(embedding: list) -> dict:
 
 
 # ============================================
+# STEP 3c: GENERATE UPCYCLE BLUEPRINT
+# ============================================
+
+def generate_upcycle_blueprint(audit_result: dict, csv_stats: dict, manufacturer_data: dict, photo_risks: list) -> dict:
+    """
+    Ask Gemini to generate a DETAILED, battery-specific upcycling blueprint.
+
+    WHY THIS EXISTS:
+    The existing audit tells us IF a battery is safe to upcycle (the audit gate).
+    But the TECHNICIAN needs to know HOW to upcycle it:
+      - Which cells/modules to bypass (the dead ones)
+      - What rewiring topology to use (series/parallel config)
+      - Exact step-by-step instructions with expected voltages
+      - What tools and BMS hardware they need
+      - Safety checkpoints between each physical step
+
+    This is the "prescription" that turns an old EV battery into a home
+    power storage system. The ElevenLabs voice agent will walk the technician
+    through these steps in real time.
+
+    WHAT GEMINI NEEDS TO KNOW:
+    We feed it the full audit context — the battery model, health grade,
+    which cells are degraded, the telemetry patterns, and any safety risks.
+    Gemini then uses its knowledge of battery engineering to produce a
+    realistic rewiring plan.
+    """
+
+    # Build context from everything we know about this battery
+    grade = audit_result.get("health_grade", "Unknown")
+    soh = audit_result.get("health_details", {}).get("state_of_health_pct", 0)
+    risks = audit_result.get("safety_risks", []) + photo_risks
+    chemistry = manufacturer_data.get("chemistry", "Unknown")
+    model = manufacturer_data.get("model", "Unknown")
+    mfg_name = manufacturer_data.get("name", "Unknown")
+    nominal_v = manufacturer_data.get("nominal_voltage", 0)
+    capacity = manufacturer_data.get("nominal_capacity_kwh", 0)
+    cycles = audit_result.get("health_details", {}).get("total_cycles", 0)
+    peak_temp = audit_result.get("health_details", {}).get("peak_temp_recorded_c", 0)
+
+    risk_text = "\n".join([
+        f"- [{r.get('severity','?')}] {r.get('risk_type','?')}: {r.get('description','')}"
+        for r in risks
+    ]) if risks else "No safety risks detected."
+
+    prompt = f"""You are a senior battery engineer for ReVolt OS, an industrial platform that upcycles used EV batteries into 48V home energy storage systems.
+
+You have completed an audit of a battery. Now you must generate the DETAILED UPCYCLING BLUEPRINT — the step-by-step technical prescription that a technician will follow to rewire this battery into a safe, functional home power storage unit.
+
+=== BATTERY IDENTITY ===
+Manufacturer: {mfg_name}
+Model: {model}
+Chemistry: {chemistry}
+Nominal cell voltage: {nominal_v}V
+Pack capacity: {capacity} kWh
+
+=== AUDIT RESULTS ===
+Health grade: {grade}
+State of health: {soh}%
+Total cycles: {cycles}
+Peak temperature recorded: {peak_temp}°C
+Voltage range: {csv_stats['voltage_min']}V – {csv_stats['voltage_max']}V
+Temperature range: {csv_stats['temp_min_c']}°C – {csv_stats['temp_max_c']}°C
+
+=== DETECTED SAFETY RISKS ===
+{risk_text}
+
+=== YOUR TASK ===
+Generate a complete upcycling blueprint. Return ONLY valid JSON with this exact structure:
+
+{{
+  "target_system": {{
+    "name": "string — e.g. '48V Home Solar Storage Module'",
+    "target_voltage": 48.0,
+    "target_capacity_kwh": 0.0,
+    "topology": "string — e.g. '14S2P' or '16S1P' — the series/parallel cell configuration",
+    "topology_explanation": "string — explain WHY this topology was chosen for this specific battery",
+    "compatible_inverters": ["list of compatible inverter types, e.g. '48V hybrid solar inverter'"],
+    "estimated_output_power_w": 0,
+    "estimated_lifespan_years": 0.0
+  }},
+  "module_assessment": [
+    {{
+      "module_id": "Module 1",
+      "status": "Keep" or "Bypass" or "Replace",
+      "reason": "string — why this module is kept, bypassed, or replaced",
+      "cell_voltage_expected": 0.0,
+      "notes": "any special handling notes"
+    }}
+  ],
+  "required_tools": [
+    {{
+      "tool": "string — tool name",
+      "specification": "string — specific rating or model, e.g. 'Class 0, rated 1000V'",
+      "purpose": "string — what this tool is used for in the procedure"
+    }}
+  ],
+  "required_parts": [
+    {{
+      "part": "string — part name, e.g. '48V BMS board'",
+      "specification": "string — specific specs",
+      "quantity": 1,
+      "purpose": "string — what this part does"
+    }}
+  ],
+  "upcycle_steps": [
+    {{
+      "step_number": 1,
+      "phase": "string — one of: Preparation, Discharging, Disassembly, Cell Testing, Rewiring, BMS Installation, Verification, Final Check",
+      "title": "string — short title for this step",
+      "instruction": "string — DETAILED instruction. Include specific voltages, pin numbers, wire colors, physical locations where relevant. Be as specific as a senior engineer would be when training an apprentice.",
+      "expected_reading": "string or null — what the multimeter/instrument should show after this step",
+      "safety_warning": "string or null — any safety concern specific to this step",
+      "estimated_minutes": 0,
+      "voice_agent_note": "string — what the ElevenLabs voice agent should emphasize when walking the technician through this step"
+    }}
+  ],
+  "pre_upcycle_checklist": [
+    "string — each item the technician must have/verify before starting"
+  ],
+  "post_upcycle_verification": [
+    {{
+      "test": "string — what to test",
+      "method": "string — how to test it",
+      "expected_result": "string — what a passing result looks like",
+      "fail_action": "string — what to do if it fails"
+    }}
+  ],
+  "estimated_total_time_hours": 0.0,
+  "difficulty_level": "string — Beginner, Intermediate, Advanced, Expert",
+  "gemini_engineering_notes": "string — 2-3 sentences of engineering rationale explaining the overall approach and any special considerations for this specific battery"
+}}
+
+IMPORTANT RULES:
+1. Base the topology on the ACTUAL battery specs. Calculate the series/parallel config needed to reach ~48V.
+2. For {chemistry} chemistry, use the correct cell voltages: NMC=3.6-3.7V, LFP=3.2V, NCA=3.6V, LTO=2.4V.
+3. If cells or modules are degraded (based on the risks), mark them for bypass and adjust the topology.
+4. Include REALISTIC step counts — a full upcycle typically has 12-20 steps.
+5. Every step that involves touching the battery must have a safety_warning.
+6. The voice_agent_note should be conversational — it's what a calm mentor would say out loud.
+7. Include expected multimeter readings wherever relevant.
+8. If the manufacturer/model is Unknown, base the blueprint on the telemetry data (voltage range tells you chemistry and cell count)."""
+
+    print(f"  Generating upcycle blueprint with Gemini...")
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt
+    )
+
+    blueprint = clean_json_response(response.text)
+    step_count = len(blueprint.get("upcycle_steps", []))
+    target = blueprint.get("target_system", {})
+    print(f"  Blueprint generated: {step_count} steps")
+    print(f"  Target: {target.get('topology', '?')} → {target.get('target_voltage', '?')}V")
+    print(f"  Difficulty: {blueprint.get('difficulty_level', '?')}")
+    print(f"  Est. time: {blueprint.get('estimated_total_time_hours', '?')} hours")
+
+    return blueprint
+
+
+# ============================================
 # STEP 4: BUILD COMPLETE DIGITAL TWIN
 # ============================================
 
@@ -410,14 +570,14 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
     print(f"Battery ID: {battery_id}")
 
     # --- Parse CSV stats locally ---
-    print(f"\n[1/5] Parsing telemetry stats...")
+    print(f"\n[1/6] Parsing telemetry stats...")
     csv_stats = parse_csv_stats(csv_path)
     print(f"  {csv_stats['data_points_count']} data points, {csv_stats['cycle_count']} cycles")
     print(f"  Voltage: {csv_stats['voltage_min']}V - {csv_stats['voltage_max']}V")
     print(f"  Temp: {csv_stats['temp_min_c']}°C - {csv_stats['temp_max_c']}°C")
 
     # --- Gemini telemetry analysis ---
-    print(f"\n[2/5] Running Gemini telemetry audit...")
+    print(f"\n[2/6] Running Gemini telemetry audit...")
     audit_result = run_audit(csv_path, csv_stats)
     print(f"  Health grade: {audit_result.get('health_grade', '?')}")
     print(f"  Safety risks: {len(audit_result.get('safety_risks', []))}")
@@ -428,7 +588,7 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
     physical_condition = "Unknown — no photo provided"
 
     if image_path and Path(image_path).exists():
-        print(f"\n[3/5] Analyzing battery photo with Gemini Vision...")
+        print(f"\n[3/6] Analyzing battery photo with Gemini Vision...")
         image_result = analyze_image(image_path)
 
         if "manufacturer" in image_result:
@@ -448,14 +608,14 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
         print(f"  Condition: {physical_condition}")
         print(f"  Photo risks: {len(photo_risks)}")
     else:
-        print(f"\n[3/5] No photo provided — skipping vision analysis")
+        print(f"\n[3/6] No photo provided — skipping vision analysis")
 
     # --- Generate embedding ---
-    print(f"\n[4/5] Generating telemetry embedding...")
+    print(f"\n[4/6] Generating telemetry embedding...")
     embedding = generate_telemetry_embedding(csv_path)
 
     # --- Compare against failure state library via Vector Search ---
-    print(f"\n[5/5] Comparing against failure state library (MongoDB Vector Search)...")
+    print(f"\n[5/6] Comparing against failure state library (MongoDB Vector Search)...")
     failure_comparison = compare_against_failures(embedding)
 
     # --- Combine into the Digital Twin ---
@@ -490,6 +650,19 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
 
     battery_status = "Rejected for Recycling" if is_rejected else "Certified for Repurpose"
 
+    # --- STEP 6: GENERATE UPCYCLE BLUEPRINT (only for certified batteries) ---
+    upcycle_blueprint = None
+    if not is_rejected:
+        print(f"\n[6/6] Generating upcycle blueprint with Gemini...")
+        upcycle_blueprint = generate_upcycle_blueprint(
+            audit_result=audit_result,
+            csv_stats=csv_stats,
+            manufacturer_data=manufacturer_data,
+            photo_risks=photo_risks,
+        )
+    else:
+        print(f"\n[6/6] Battery REJECTED — skipping upcycle blueprint generation")
+
     digital_twin = {
         "battery_id": battery_id,
         "status":     battery_status,
@@ -508,6 +681,9 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
             "discharge_curve_shape": "Unknown",
         },
         "behavior_embedding": embedding,
+        # NEW: The upcycle blueprint — the full technical prescription
+        # This is None for rejected batteries, and a detailed JSON object for certified ones
+        "upcycle_blueprint": upcycle_blueprint,
         "listing": {
             "title":            listing_data.get("title", f"Used Battery Pack — Grade {audit_result.get('health_grade', '?')}"),
             "description":      listing_data.get("description", "Awaiting full listing generation."),
@@ -520,7 +696,11 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
         "safety_workflow": {
             "current_state": "Not Started" if not is_rejected else "Rejected",
             "technician_id": None,
-            "target_config": audit_result.get("recommended_config") if not is_rejected else "Recycling — no upcycle config",
+            "target_config": (
+                f"{upcycle_blueprint['target_system']['topology']} {upcycle_blueprint['target_system']['name']}"
+                if upcycle_blueprint and upcycle_blueprint.get("target_system")
+                else (audit_result.get("recommended_config") if not is_rejected else "Recycling — no upcycle config")
+            ),
             "started_at":    None,
             "completed_at":  None,
             "compliance_log": [],
@@ -573,16 +753,32 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
         print(f"  Action: Generate Recycling Manifest")
         print(f"  >>> DO NOT ATTEMPT UPCYCLING <<<")
     else:
-        print(f"  \u2713 STATUS: CERTIFIED FOR REPURPOSE")
+        print(f"  ✓ STATUS: CERTIFIED FOR REPURPOSE")
         print(f"  Battery ID:   {battery_id}")
         print(f"  Grade:        {grade}")
         print(f"  SOH:          {soh}%")
         print(f"  Safety risks: {len(all_risks)}")
         print(f"  Failure library: CLEAR")
         print(f"  Embedding:    {len(embedding)} dimensions")
+        
+        if upcycle_blueprint:
+            ts = upcycle_blueprint.get("target_system", {})
+            steps = upcycle_blueprint.get("upcycle_steps", [])
+            modules = upcycle_blueprint.get("module_assessment", [])
+            bypassed = [m for m in modules if m.get("status") == "Bypass"]
+            print(f"\n  ── UPCYCLE BLUEPRINT ──")
+            print(f"  Target:       {ts.get('topology', '?')} → {ts.get('target_voltage', '?')}V {ts.get('name', '')}")
+            print(f"  Capacity:     {ts.get('target_capacity_kwh', '?')} kWh")
+            print(f"  Modules:      {len(modules)} total, {len(bypassed)} bypassed")
+            print(f"  Steps:        {len(steps)}")
+            print(f"  Difficulty:   {upcycle_blueprint.get('difficulty_level', '?')}")
+            print(f"  Est. time:    {upcycle_blueprint.get('estimated_total_time_hours', '?')} hours")
+            print(f"  Tools needed: {len(upcycle_blueprint.get('required_tools', []))}")
+            print(f"  Parts needed: {len(upcycle_blueprint.get('required_parts', []))}")
+        
         print(f"\n  Classification: Secondary Life Asset")
-        print(f"  Action: Generate Battery Passport + trigger Safety Foreman")
-        print(f"  >>> CLEARED for 48V upcycling workflow <<<")
+        print(f"  Action: Generate Battery Passport + Upcycle Blueprint + trigger Safety Foreman")
+        print(f"  >>> CLEARED for upcycling workflow <<<")
     
     print(f"{'=' * 50}")
 
@@ -836,6 +1032,180 @@ def generate_passport_pdf(digital_twin: dict) -> str:
         story.append(Paragraph("Active Warnings:", body_style))
         for w in warnings:
             story.append(Paragraph(f"  WARNING: {w}", body_style))
+
+    story.append(Spacer(1, 10))
+
+    # ── UPCYCLE BLUEPRINT (only for certified batteries) ──
+    blueprint = digital_twin.get("upcycle_blueprint")
+    if blueprint:
+        story.append(Paragraph("Upcycle Blueprint — Technical Prescription", section_style))
+
+        # Target system summary
+        target_sys = blueprint.get("target_system", {})
+        story.append(Paragraph(
+            f"<b>Target:</b> {target_sys.get('name', 'Unknown')} | "
+            f"<b>Topology:</b> {target_sys.get('topology', '?')} | "
+            f"<b>Voltage:</b> {target_sys.get('target_voltage', '?')}V | "
+            f"<b>Capacity:</b> {target_sys.get('target_capacity_kwh', '?')} kWh | "
+            f"<b>Difficulty:</b> {blueprint.get('difficulty_level', '?')} | "
+            f"<b>Est. Time:</b> {blueprint.get('estimated_total_time_hours', '?')} hrs",
+            body_style
+        ))
+        story.append(Spacer(1, 4))
+
+        if target_sys.get("topology_explanation"):
+            story.append(Paragraph(
+                f"<i>Engineering rationale: {target_sys['topology_explanation']}</i>",
+                body_style
+            ))
+            story.append(Spacer(1, 6))
+
+        # Module assessment table
+        modules = blueprint.get("module_assessment", [])
+        if modules:
+            story.append(Paragraph("Module Assessment", body_style))
+            mod_rows = [["Module", "Status", "Reason"]]
+            for m in modules:
+                mod_rows.append([
+                    m.get("module_id", "?"),
+                    m.get("status", "?"),
+                    m.get("reason", ""),
+                ])
+            mod_table = Table(mod_rows, colWidths=[1.0*inch, 0.8*inch, 4.9*inch])
+            mod_table.setStyle(TableStyle([
+                ('BACKGROUND',     (0,0), (-1,0), colors.HexColor('#2d6a4f')),
+                ('TEXTCOLOR',      (0,0), (-1,0), colors.white),
+                ('FONTNAME',       (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE',       (0,0), (-1,-1), 8),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f0faf5')]),
+                ('GRID',    (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('VALIGN',  (0,0), (-1,-1), 'TOP'),
+            ]))
+            story.append(mod_table)
+            story.append(Spacer(1, 8))
+
+        # Required tools & parts
+        tools = blueprint.get("required_tools", [])
+        parts = blueprint.get("required_parts", [])
+        if tools:
+            story.append(Paragraph("Required Tools", body_style))
+            tool_rows = [["Tool", "Specification", "Purpose"]]
+            for t in tools:
+                tool_rows.append([t.get("tool",""), t.get("specification",""), t.get("purpose","")])
+            tool_table = Table(tool_rows, colWidths=[1.5*inch, 2.0*inch, 3.2*inch])
+            tool_table.setStyle(TableStyle([
+                ('BACKGROUND',     (0,0), (-1,0), colors.HexColor('#1a1a2e')),
+                ('TEXTCOLOR',      (0,0), (-1,0), colors.white),
+                ('FONTNAME',       (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE',       (0,0), (-1,-1), 8),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
+                ('GRID',    (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('VALIGN',  (0,0), (-1,-1), 'TOP'),
+            ]))
+            story.append(tool_table)
+            story.append(Spacer(1, 6))
+
+        if parts:
+            story.append(Paragraph("Required Parts", body_style))
+            part_rows = [["Part", "Spec", "Qty", "Purpose"]]
+            for p in parts:
+                part_rows.append([p.get("part",""), p.get("specification",""), str(p.get("quantity",1)), p.get("purpose","")])
+            part_table = Table(part_rows, colWidths=[1.5*inch, 1.8*inch, 0.4*inch, 3.0*inch])
+            part_table.setStyle(TableStyle([
+                ('BACKGROUND',     (0,0), (-1,0), colors.HexColor('#1a1a2e')),
+                ('TEXTCOLOR',      (0,0), (-1,0), colors.white),
+                ('FONTNAME',       (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE',       (0,0), (-1,-1), 8),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
+                ('GRID',    (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('VALIGN',  (0,0), (-1,-1), 'TOP'),
+            ]))
+            story.append(part_table)
+            story.append(Spacer(1, 6))
+
+        # Pre-upcycle checklist
+        checklist = blueprint.get("pre_upcycle_checklist", [])
+        if checklist:
+            story.append(Paragraph("Pre-Upcycle Checklist", body_style))
+            for i, item in enumerate(checklist, 1):
+                story.append(Paragraph(f"  ☐ {item}", body_style))
+            story.append(Spacer(1, 6))
+
+        # Step-by-step upcycle procedure
+        steps = blueprint.get("upcycle_steps", [])
+        if steps:
+            story.append(Paragraph("Step-by-Step Upcycle Procedure", section_style))
+            story.append(Paragraph(
+                "The ElevenLabs Safety Foreman voice agent will walk the technician through "
+                "each step below in real time. Steps must be completed in order.",
+                body_style
+            ))
+            story.append(Spacer(1, 4))
+
+            for step in steps:
+                sn = step.get("step_number", "?")
+                phase = step.get("phase", "")
+                title = step.get("title", "")
+                instruction = step.get("instruction", "")
+                expected = step.get("expected_reading")
+                warning = step.get("safety_warning")
+                minutes = step.get("estimated_minutes", 0)
+
+                step_rows = [
+                    [f"Step {sn}: {title}", f"Phase: {phase} | ~{minutes} min"],
+                    ["Instruction", instruction],
+                ]
+                if expected:
+                    step_rows.append(["Expected Reading", expected])
+                if warning:
+                    step_rows.append(["⚠ Safety Warning", warning])
+
+                s_table = Table(step_rows, colWidths=[1.5*inch, 5.2*inch])
+                header_color = colors.HexColor('#d32f2f') if warning else colors.HexColor('#1a1a2e')
+                s_table.setStyle(TableStyle([
+                    ('SPAN',       (0,0), (1,0)),
+                    ('BACKGROUND', (0,0), (1,0), header_color),
+                    ('TEXTCOLOR',  (0,0), (1,0), colors.white),
+                    ('FONTNAME',   (0,0), (1,0), 'Helvetica-Bold'),
+                    ('FONTSIZE',   (0,0), (-1,-1), 8),
+                    ('BACKGROUND', (0,1), (0,-1), colors.HexColor('#f0f0f5')),
+                    ('FONTNAME',   (0,1), (0,-1), 'Helvetica-Bold'),
+                    ('GRID',       (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                    ('PADDING',    (0,0), (-1,-1), 4),
+                    ('VALIGN',     (0,0), (-1,-1), 'TOP'),
+                ]))
+                story.append(s_table)
+                story.append(Spacer(1, 4))
+
+        # Post-upcycle verification
+        verifications = blueprint.get("post_upcycle_verification", [])
+        if verifications:
+            story.append(Spacer(1, 4))
+            story.append(Paragraph("Post-Upcycle Verification", section_style))
+            v_rows = [["Test", "Method", "Expected Result", "If Fail"]]
+            for v in verifications:
+                v_rows.append([v.get("test",""), v.get("method",""), v.get("expected_result",""), v.get("fail_action","")])
+            v_table = Table(v_rows, colWidths=[1.3*inch, 1.8*inch, 2.0*inch, 1.6*inch])
+            v_table.setStyle(TableStyle([
+                ('BACKGROUND',     (0,0), (-1,0), colors.HexColor('#2d6a4f')),
+                ('TEXTCOLOR',      (0,0), (-1,0), colors.white),
+                ('FONTNAME',       (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE',       (0,0), (-1,-1), 8),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f0faf5')]),
+                ('GRID',    (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('VALIGN',  (0,0), (-1,-1), 'TOP'),
+            ]))
+            story.append(v_table)
+            story.append(Spacer(1, 6))
+
+        # Engineering notes
+        eng_notes = blueprint.get("gemini_engineering_notes")
+        if eng_notes:
+            story.append(Paragraph(f"<i>Gemini Engineering Notes: {eng_notes}</i>", body_style))
 
     story.append(Spacer(1, 10))
 

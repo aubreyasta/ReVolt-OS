@@ -795,6 +795,61 @@ def update_safety_workflow(battery_id):
     return jsonify({"error": f"Unknown action '{action}'. Use 'advance' or 'log'."}), 400
 
 
+# ============================================
+# ENDPOINT: GET /api/batteries/<id>/blueprint
+# ============================================
+@app.route("/api/batteries/<battery_id>/blueprint", methods=["GET"])
+def get_battery_blueprint(battery_id):
+    """
+    Return the upcycle blueprint for a specific battery.
+
+    WHO USES THIS:
+      Person 4 (React) → displays the step-by-step blueprint, module diagram,
+                          tool checklist, and "Ready to Start" button
+      Person 3 (Voice)  → ElevenLabs agent reads the steps during walkthrough
+
+    WHAT IT RETURNS:
+      The full upcycle_blueprint object from the Digital Twin, including:
+      - target_system (topology, voltage, capacity)
+      - module_assessment (which modules to keep/bypass)
+      - required_tools and required_parts
+      - pre_upcycle_checklist
+      - upcycle_steps (the detailed step-by-step procedure)
+      - post_upcycle_verification
+
+    Returns 404 if battery not found, or 400 if battery was rejected.
+    """
+    battery = collection.find_one({"battery_id": battery_id})
+
+    if not battery:
+        return jsonify({"error": f"Battery {battery_id} not found"}), 404
+
+    blueprint = battery.get("upcycle_blueprint")
+    status = battery.get("status", "Unknown")
+
+    if status == "Rejected for Recycling":
+        return jsonify({
+            "error": "This battery was rejected for recycling. No upcycle blueprint available.",
+            "status": status,
+            "rejection_reasons": battery.get("audit_manifest", {}).get("rejection_reasons", []),
+        }), 400
+
+    if not blueprint:
+        return jsonify({
+            "error": "No upcycle blueprint has been generated for this battery yet.",
+            "status": status,
+            "hint": "Run the audit pipeline with a CSV that produces a passing grade.",
+        }), 404
+
+    return jsonify({
+        "battery_id": battery_id,
+        "status": status,
+        "health_grade": battery.get("health_grade"),
+        "manufacturer": battery.get("manufacturer"),
+        "blueprint": blueprint,
+    })
+
+
 # --- CHANGE STREAM WATCHER (Updated for Safety Workflow) ---
 @app.route("/api/watch/disassembly", methods=["GET"])
 def watch_disassembly_info():
@@ -934,6 +989,7 @@ if __name__ == "__main__":
     print(f"  GET  /api/batteries/<id>/safety     → Get safety workflow state")
     print(f"  PATCH /api/batteries/<id>/safety     → Advance/log safety step")
     print(f"  PATCH /api/batteries/<id>/status     → Update marketplace status")
+    print(f"  GET  /api/batteries/<id>/blueprint  → Get upcycle blueprint")
     print()
     
     # Start the server

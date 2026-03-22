@@ -81,6 +81,72 @@ def update_agent_context(battery_id: str, current_state: str, safety_risks: list
     manifest = battery_data.get("audit_manifest", {})
     target_config = workflow.get("target_config") or "48V stationary storage"
 
+    # Extract the upcycle blueprint if it exists
+    blueprint = battery_data.get("upcycle_blueprint")
+    blueprint_context = ""
+    if blueprint:
+        target_sys = blueprint.get("target_system", {})
+        modules = blueprint.get("module_assessment", [])
+        steps = blueprint.get("upcycle_steps", [])
+        tools = blueprint.get("required_tools", [])
+        parts = blueprint.get("required_parts", [])
+        checklist = blueprint.get("pre_upcycle_checklist", [])
+        verifications = blueprint.get("post_upcycle_verification", [])
+
+        # Build module summary
+        module_lines = []
+        for m in modules:
+            module_lines.append(f"  - {m.get('module_id','?')}: {m.get('status','?')} — {m.get('reason','')}")
+        module_text = "\n".join(module_lines) if module_lines else "  No module data"
+
+        # Build step summary (the voice agent needs these)
+        step_lines = []
+        for s in steps:
+            sn = s.get("step_number", "?")
+            title = s.get("title", "")
+            instruction = s.get("instruction", "")
+            expected = s.get("expected_reading", "")
+            warning = s.get("safety_warning", "")
+            note = s.get("voice_agent_note", "")
+            step_lines.append(
+                f"  STEP {sn}: {title}\n"
+                f"    Instruction: {instruction}\n"
+                f"    Expected reading: {expected or 'N/A'}\n"
+                f"    Safety warning: {warning or 'None'}\n"
+                f"    Voice note: {note}"
+            )
+        step_text = "\n\n".join(step_lines) if step_lines else "  No steps available"
+
+        # Build tools/parts lists
+        tool_text = "\n".join([f"  - {t.get('tool','?')}: {t.get('specification','')}" for t in tools]) or "  None listed"
+        part_text = "\n".join([f"  - {p.get('part','?')} x{p.get('quantity',1)}: {p.get('specification','')}" for p in parts]) or "  None listed"
+        checklist_text = "\n".join([f"  ☐ {item}" for item in checklist]) or "  None listed"
+
+        blueprint_context = f"""
+
+UPCYCLE BLUEPRINT (Gemini-generated prescription for this specific battery):
+Target System: {target_sys.get('name', '?')} | {target_sys.get('topology', '?')} | {target_sys.get('target_voltage', '?')}V
+Topology Rationale: {target_sys.get('topology_explanation', 'N/A')}
+Estimated Time: {blueprint.get('estimated_total_time_hours', '?')} hours
+Difficulty: {blueprint.get('difficulty_level', '?')}
+
+MODULE ASSESSMENT:
+{module_text}
+
+REQUIRED TOOLS:
+{tool_text}
+
+REQUIRED PARTS:
+{part_text}
+
+PRE-UPCYCLE CHECKLIST:
+{checklist_text}
+
+STEP-BY-STEP UPCYCLE PROCEDURE:
+{step_text}
+
+ENGINEERING NOTES: {blueprint.get('gemini_engineering_notes', 'N/A')}"""
+
     battery_context = f"""BATTERY IDENTITY:
 - ID: {battery_id}
 - Manufacturer: {mfg.get('name', 'Unknown')}
@@ -104,7 +170,8 @@ TELEMETRY SUMMARY:
 - Capacity fade: {ts.get('capacity_fade_pct', '?')}%
 
 TARGET CONFIGURATION: {target_config}
-EN 18061:2025 STATUS: {manifest.get('en_18061_status', battery_data.get('status', 'Unknown'))}"""
+EN 18061:2025 STATUS: {manifest.get('en_18061_status', battery_data.get('status', 'Unknown'))}
+{blueprint_context}"""
 
     # Detailed state-specific instructions with real technical procedures
     state_instructions = {

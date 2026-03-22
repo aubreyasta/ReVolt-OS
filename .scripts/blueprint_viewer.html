@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ReVolt OS — Upcycle Blueprint Viewer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+  
+  :root {
+    --bg: #0a0e17;
+    --bg2: #111827;
+    --bg3: #1e293b;
+    --card: #151d2e;
+    --border: rgba(148,163,184,.15);
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --text3: #64748b;
+    --accent: #22d3ee;
+    --accent2: #06b6d4;
+    --green: #22c55e;
+    --green-bg: rgba(34,197,94,.12);
+    --red: #ef4444;
+    --red-bg: rgba(239,68,68,.12);
+    --amber: #f59e0b;
+    --amber-bg: rgba(245,158,11,.12);
+    --blue: #3b82f6;
+    --blue-bg: rgba(59,130,246,.12);
+    --purple: #a78bfa;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Space Grotesk', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+
+  .header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px;
+  }
+  .header .logo {
+    font-size: 13px; font-weight: 600; letter-spacing: 2px;
+    color: var(--accent); text-transform: uppercase;
+    background: rgba(34,211,238,.08); padding: 6px 12px; border-radius: 6px;
+    border: 1px solid rgba(34,211,238,.2);
+  }
+  .header h1 { font-size: 20px; font-weight: 600; }
+  .header .badge {
+    margin-left: auto; font-size: 12px; font-family: var(--mono);
+    padding: 4px 10px; border-radius: 4px;
+  }
+  .badge-certified { background: var(--green-bg); color: var(--green); border: 1px solid rgba(34,197,94,.3); }
+
+  .layout { display: grid; grid-template-columns: 1fr 380px; min-height: calc(100vh - 73px); }
+
+  .main { padding: 24px 32px; overflow-y: auto; }
+  .sidebar { border-left: 1px solid var(--border); overflow-y: auto; }
+
+  .section { margin-bottom: 28px; }
+  .section-title {
+    font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--text3); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-title::after {
+    content: ''; flex: 1; height: 1px;
+    background: linear-gradient(90deg, var(--border), transparent);
+  }
+
+  .target-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+  .stat-value { font-size: 18px; font-weight: 600; font-family: var(--mono); }
+  .stat-value.accent { color: var(--accent); }
+  .stat-value.green { color: var(--green); }
+
+  .topology-explain {
+    grid-column: 1 / -1; font-size: 13px; color: var(--text2);
+    line-height: 1.6; padding-top: 12px; border-top: 1px solid var(--border);
+  }
+
+  #three-container {
+    width: 100%; height: 320px; border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--border); margin-bottom: 16px; position: relative;
+    background: #080c14;
+  }
+  #three-container canvas { display: block; }
+  .three-hint {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: var(--text3); background: rgba(0,0,0,.6);
+    padding: 4px 12px; border-radius: 4px; pointer-events: none;
+  }
+
+  .module-legend {
+    display: flex; gap: 16px; margin-bottom: 16px; font-size: 12px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+  .legend-dot.keep { background: var(--green); }
+  .legend-dot.bypass { background: var(--red); }
+  .legend-dot.replace { background: var(--amber); }
+
+  .modules-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;
+  }
+  .mod-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; font-size: 13px; cursor: pointer; transition: border-color .2s;
+  }
+  .mod-card:hover { border-color: var(--accent); }
+  .mod-card.keep { border-left: 3px solid var(--green); }
+  .mod-card.bypass { border-left: 3px solid var(--red); }
+  .mod-card.replace { border-left: 3px solid var(--amber); }
+  .mod-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .mod-status { font-size: 11px; font-family: var(--mono); margin-bottom: 4px; }
+  .mod-reason { font-size: 12px; color: var(--text2); line-height: 1.4; }
+
+  .step-item {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 10px; overflow: hidden; transition: border-color .2s;
+  }
+  .step-item.active { border-color: var(--accent); }
+  .step-item.done { border-color: var(--green); opacity: .7; }
+  .step-header {
+    padding: 14px 16px; cursor: pointer; display: flex; align-items: center; gap: 12px;
+  }
+  .step-num {
+    width: 28px; height: 28px; border-radius: 6px; display: flex;
+    align-items: center; justify-content: center; font-size: 12px;
+    font-weight: 600; font-family: var(--mono); flex-shrink: 0;
+    background: var(--bg3); color: var(--text2);
+  }
+  .step-item.active .step-num { background: rgba(34,211,238,.15); color: var(--accent); }
+  .step-item.done .step-num { background: var(--green-bg); color: var(--green); }
+  .step-title { font-size: 14px; font-weight: 500; flex: 1; }
+  .step-phase {
+    font-size: 10px; font-family: var(--mono); color: var(--text3);
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .step-time { font-size: 11px; color: var(--text3); font-family: var(--mono); }
+  .step-body {
+    padding: 0 16px 16px 56px; display: none;
+  }
+  .step-item.active .step-body { display: block; }
+  .step-instruction { font-size: 13px; color: var(--text2); line-height: 1.7; margin-bottom: 12px; }
+  .step-meta { display: flex; flex-direction: column; gap: 8px; }
+  .step-reading, .step-warning, .step-voice {
+    font-size: 12px; padding: 8px 12px; border-radius: 6px; line-height: 1.5;
+  }
+  .step-reading { background: var(--blue-bg); color: #93c5fd; border: 1px solid rgba(59,130,246,.2); }
+  .step-warning { background: var(--red-bg); color: #fca5a5; border: 1px solid rgba(239,68,68,.2); }
+  .step-voice { background: rgba(167,139,250,.08); color: #c4b5fd; border: 1px solid rgba(167,139,250,.2); }
+  .step-reading::before { content: 'EXPECTED: '; font-weight: 600; font-family: var(--mono); font-size: 10px; }
+  .step-warning::before { content: 'WARNING: '; font-weight: 600; font-family: var(--mono); font-size: 10px; }
+  .step-voice::before { content: 'VOICE AGENT: '; font-weight: 600; font-family: var(--mono); font-size: 10px; }
+
+  .sidebar-section { padding: 20px; border-bottom: 1px solid var(--border); }
+  .sidebar-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+
+  .tool-item, .part-item {
+    font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .tool-item:last-child, .part-item:last-child { border-bottom: none; }
+  .tool-name { font-weight: 500; }
+  .tool-spec { font-family: var(--mono); color: var(--accent); font-size: 11px; }
+  .tool-purpose { color: var(--text3); font-size: 11px; }
+
+  .check-item {
+    font-size: 13px; padding: 8px 0; display: flex; align-items: flex-start; gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .check-item:last-child { border-bottom: none; }
+  .check-box {
+    width: 18px; height: 18px; border: 1.5px solid var(--text3); border-radius: 4px;
+    flex-shrink: 0; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; transition: all .15s; margin-top: 1px;
+  }
+  .check-box.checked { background: var(--green); border-color: var(--green); }
+  .check-box.checked::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; }
+
+  .ready-btn {
+    width: 100%; padding: 16px; background: linear-gradient(135deg, #0891b2, #06b6d4);
+    color: #fff; font-size: 15px; font-weight: 600; font-family: var(--sans);
+    border: none; border-radius: 10px; cursor: pointer; margin-top: 16px;
+    transition: transform .1s, box-shadow .2s; letter-spacing: .5px;
+  }
+  .ready-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(6,182,212,.3); }
+  .ready-btn:active { transform: scale(.98); }
+  .ready-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+  .eng-notes {
+    font-size: 13px; color: var(--text2); line-height: 1.6;
+    font-style: italic; padding: 12px 16px;
+    border-left: 2px solid var(--accent); background: rgba(34,211,238,.04);
+    border-radius: 0 8px 8px 0;
+  }
+
+  .verification-table {
+    width: 100%; font-size: 12px; border-collapse: collapse;
+  }
+  .verification-table th {
+    text-align: left; padding: 8px; font-size: 10px; text-transform: uppercase;
+    letter-spacing: .5px; color: var(--text3); border-bottom: 1px solid var(--border);
+  }
+  .verification-table td {
+    padding: 8px; color: var(--text2); border-bottom: 1px solid var(--border);
+    line-height: 1.4;
+  }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { border-left: none; border-top: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="logo">ReVolt OS</span>
+  <h1>Upcycle Blueprint</h1>
+  <span class="badge badge-certified" id="status-badge">CERTIFIED</span>
+</div>
+
+<div class="layout">
+  <div class="main">
+    <div class="section">
+      <div class="section-title">Target system</div>
+      <div class="target-card" id="target-card"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">3D module layout</div>
+      <div id="three-container">
+        <span class="three-hint">Drag to rotate · Scroll to zoom</span>
+      </div>
+      <div class="module-legend">
+        <div class="legend-item"><div class="legend-dot keep"></div> Keep</div>
+        <div class="legend-item"><div class="legend-dot bypass"></div> Bypass</div>
+        <div class="legend-item"><div class="legend-dot replace"></div> Replace</div>
+      </div>
+      <div class="modules-grid" id="modules-grid"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Step-by-step procedure</div>
+      <div class="steps-container" id="steps-container"></div>
+    </div>
+
+    <div class="section" id="verification-section" style="display:none">
+      <div class="section-title">Post-upcycle verification</div>
+      <table class="verification-table" id="verification-table">
+        <thead><tr><th>Test</th><th>Method</th><th>Expected</th><th>If fail</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="section" id="notes-section" style="display:none">
+      <div class="section-title">Engineering notes</div>
+      <div class="eng-notes" id="eng-notes"></div>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-title">Required tools</div>
+      <div id="tools-list"></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Required parts</div>
+      <div id="parts-list"></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Pre-upcycle checklist</div>
+      <div id="checklist"></div>
+    </div>
+    <div class="sidebar-section">
+      <button class="ready-btn" id="ready-btn" disabled onclick="startVoiceAgent()">
+        Start voice walkthrough
+      </button>
+      <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px">
+        Complete checklist to enable
+      </p>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+// SAMPLE BLUEPRINT DATA
+// Replace this with a fetch() to your API:
+//   GET /api/batteries/<id>/blueprint
+// ============================================================
+const SAMPLE_BLUEPRINT = {
+  battery_id: "RVX-2026-0322060145",
+  status: "Certified for Repurpose",
+  health_grade: "B",
+  manufacturer: { name: "Nissan", model: "Leaf Gen 2 ZE1", chemistry: "NMC" },
+  blueprint: {
+    target_system: {
+      name: "48V Home Solar Storage Module",
+      target_voltage: 48.0,
+      target_capacity_kwh: 4.8,
+      topology: "14S2P",
+      topology_explanation: "The Nissan Leaf Gen 2 uses NMC cells at 3.65V nominal. 14 cells in series yields 51.1V nominal (within 48V inverter range). 2 parallel strings double the capacity from 2.4kWh to 4.8kWh while keeping current draw per cell conservative.",
+      compatible_inverters: ["48V hybrid solar inverter", "Victron MultiPlus 48/3000"],
+      estimated_output_power_w: 3000,
+      estimated_lifespan_years: 5.2
+    },
+    module_assessment: [
+      { module_id: "Module 1", status: "Keep", reason: "Healthy NMC module, 3.62V per cell, balanced within 0.02V delta", cell_voltage_expected: 3.62, notes: "Front-left position" },
+      { module_id: "Module 2", status: "Keep", reason: "Good condition, slight capacity fade but within spec", cell_voltage_expected: 3.60, notes: "Front-right position" },
+      { module_id: "Module 3", status: "Bypass", reason: "Cell #3 shows 0.15V delta — internal resistance too high, likely dendrite growth", cell_voltage_expected: 3.41, notes: "Isolate and label for recycling" },
+      { module_id: "Module 4", status: "Keep", reason: "Strong module, lowest cycle wear in pack", cell_voltage_expected: 3.64, notes: "Center-right position" },
+      { module_id: "Module 5", status: "Keep", reason: "Healthy, minor thermal wear but within EN 18061 limits", cell_voltage_expected: 3.59, notes: "Rear-left position" },
+      { module_id: "Module 6", status: "Keep", reason: "Good capacity retention at 88%", cell_voltage_expected: 3.61, notes: "Rear-center position" },
+      { module_id: "Module 7", status: "Replace", reason: "Swelling detected on visual inspection — potential thermal abuse", cell_voltage_expected: 3.22, notes: "Do NOT discharge — handle with thermal gloves" },
+    ],
+    required_tools: [
+      { tool: "Insulated gloves", specification: "Class 0, rated 1000V AC", purpose: "Hand protection during all contact with pack" },
+      { tool: "Digital multimeter", specification: "CAT III 600V, True RMS", purpose: "Voltage verification at every step" },
+      { tool: "Torque wrench", specification: "10-25 Nm range, insulated", purpose: "Busbar bolt removal and reassembly" },
+      { tool: "Resistive load bank", specification: "1kW minimum, 0-100V input", purpose: "Safe discharge of pack to target voltage" },
+      { tool: "Wire crimping tool", specification: "For 4-6 AWG lugs", purpose: "New busbar connections in target topology" },
+      { tool: "Class D fire extinguisher", specification: "Lithium-rated, 2kg minimum", purpose: "Emergency thermal event suppression" },
+    ],
+    required_parts: [
+      { part: "48V BMS board", specification: "14S NMC, 60A continuous", quantity: 1, purpose: "Battery management and cell balancing" },
+      { part: "Copper busbars", specification: "4AWG, nickel-plated, pre-cut", quantity: 14, purpose: "Series connections between cells" },
+      { part: "Balance leads", specification: "22AWG, JST-XH connectors", quantity: 1, purpose: "BMS cell monitoring harness" },
+      { part: "Temperature sensor", specification: "10K NTC thermistor", quantity: 2, purpose: "Pack thermal monitoring" },
+      { part: "Compression rods", specification: "M8 threaded, 350mm", quantity: 4, purpose: "Structural assembly of module stack" },
+    ],
+    pre_upcycle_checklist: [
+      "Wearing Class 0 insulated gloves rated for 1000V",
+      "Safety glasses with side shields on",
+      "Arc flash suit or flame-resistant clothing worn",
+      "Class D fire extinguisher within arm's reach",
+      "Work area is dry with no conductive materials nearby",
+      "Another person is present or aware of the work",
+      "Digital multimeter tested and calibrated",
+      "All required tools laid out and inspected",
+      "Battery Passport PDF printed and available for reference",
+    ],
+    upcycle_steps: [
+      { step_number: 1, phase: "Preparation", title: "Verify PPE and workspace", instruction: "Put on all personal protective equipment. Confirm Class 0 insulated gloves, safety glasses, and flame-resistant clothing. Place Class D fire extinguisher within arm's reach. Ensure work surface is dry and non-conductive.", expected_reading: null, safety_warning: "Never work alone on high-voltage battery systems.", estimated_minutes: 5, voice_agent_note: "Let's start with safety. Can you confirm each PPE item one by one?" },
+      { step_number: 2, phase: "Preparation", title: "Measure pack voltage", instruction: "Using your CAT III multimeter, measure the total pack voltage across the main positive and negative terminals. Record the reading.", expected_reading: "~350-400V DC (dangerous — do not touch terminals)", safety_warning: "This voltage is LETHAL. Keep hands clear of terminals. Use only insulated probes.", estimated_minutes: 3, voice_agent_note: "Before we touch anything, let's see what we're working with. Put your multimeter probes on the main terminals — tell me the reading." },
+      { step_number: 3, phase: "Discharging", title: "Connect resistive load bank", instruction: "Connect the 1kW resistive load bank to the main pack terminals. Set discharge rate to 0.5C or lower. Monitor voltage drop on multimeter.", expected_reading: "Voltage should drop steadily at ~2V per minute", safety_warning: "Load bank will get HOT. Do not touch the resistive elements. Keep flammable materials away.", estimated_minutes: 45, voice_agent_note: "Now we drain the pack. Connect the load bank and watch the voltage. Call out every 50V drop so I can track progress." },
+      { step_number: 4, phase: "Discharging", title: "Confirm safe voltage reached", instruction: "Wait until pack voltage drops below 50V. Disconnect load bank. Wait 5 minutes for voltage to stabilize. Re-measure.", expected_reading: "Below 50V DC after 5-minute rest", safety_warning: "If voltage spikes back above 50V after disconnecting, there may be a cell reversal. Do NOT proceed — call for support.", estimated_minutes: 8, voice_agent_note: "Good. Now disconnect the load and wait 5 minutes. The voltage should stay below 50V. If it bounces back up, stop and tell me." },
+      { step_number: 5, phase: "Disassembly", title: "Remove compression hardware", instruction: "Using the insulated torque wrench, remove the 4 compression rods (M8 bolts) holding the module stack together. Work in a cross pattern to release evenly.", expected_reading: null, safety_warning: "Modules may shift when compression is released. Support the stack as you remove bolts.", estimated_minutes: 10, voice_agent_note: "Time to open her up. Remove the bolts in a cross pattern — top-left, bottom-right, top-right, bottom-left. Support the stack as you go." },
+      { step_number: 6, phase: "Disassembly", title: "Disconnect main busbars", instruction: "Starting from the POSITIVE terminal end, disconnect busbars one at a time. Use insulated tools only. Label each connection point as you go.", expected_reading: null, safety_warning: "Even at low voltage, short-circuiting busbars causes intense arcing and burns. Remove ONE busbar at a time.", estimated_minutes: 15, voice_agent_note: "Start from the positive end. One busbar at a time. Label everything — you'll thank yourself during reassembly." },
+      { step_number: 7, phase: "Cell testing", title: "Test individual module voltages", instruction: "Measure each module's voltage with the multimeter. Compare against expected values from the blueprint. Mark Module 3 and Module 7 for removal.", expected_reading: "Keep modules: 3.59-3.64V per cell | Bypass Module 3: ~3.41V | Replace Module 7: ~3.22V", safety_warning: "Module 7 shows swelling — handle with thermal gloves. Do NOT attempt to discharge further.", estimated_minutes: 12, voice_agent_note: "Let's check each module. Read me the voltage one by one. I'll tell you if it matches the blueprint." },
+      { step_number: 8, phase: "Cell testing", title: "Separate and isolate bad modules", instruction: "Carefully remove Module 3 (bypass — high internal resistance) and Module 7 (replace — swelling detected). Place in fire-resistant container, label for recycling.", expected_reading: null, safety_warning: "Module 7 is physically compromised. Use thermal gloves. Place in LiPo safety bag if available.", estimated_minutes: 8, voice_agent_note: "Module 3 and 7 are out. Put them in the fire-safe container. We're keeping the 5 healthy modules." },
+      { step_number: 9, phase: "Rewiring", title: "Balance remaining modules", instruction: "Before connecting in the new topology, verify all 5 keeping modules are within 0.1V of each other. If any module is off, use the BMS balancing function or a small resistive load to equalize.", expected_reading: "All modules within 0.1V: target 3.60V ± 0.04V", safety_warning: "Connecting unbalanced modules causes Joule heating and potential sparking. Do not skip this step.", estimated_minutes: 15, voice_agent_note: "This is critical. Read me each module voltage. They all need to be within a tenth of a volt of each other. Take your time." },
+      { step_number: 10, phase: "Rewiring", title: "Wire 14S2P configuration", instruction: "Arrange the 5 healthy modules. Connect cells in series to build two 7S strings (each ~25.2V). Then connect the two strings in parallel to form the 14S2P pack. Use nickel-plated copper busbars for all connections. Torque to 15Nm.", expected_reading: "Each 7S string: ~25.2V | Full pack parallel: ~25.2V at double capacity", safety_warning: "Verify polarity TWICE before making each connection. A reversed string reads ~0V at pack level.", estimated_minutes: 25, voice_agent_note: "Here's the main event. We're building two 7-cell strings in series, then joining them in parallel. I'll walk you through each connection." },
+      { step_number: 11, phase: "BMS Installation", title: "Install BMS and balance leads", instruction: "Mount the 14S BMS board. Connect balance leads to each cell junction point — Pin 1 is ground, Pins 2-15 go to each series connection point. Connect main positive and negative to pack terminals. Attach both temperature sensors.", expected_reading: "BMS LED should illuminate. All 14 cell voltages visible on BMS display.", safety_warning: "Balance lead connector is keyed — do not force. Wrong pin assignment can destroy the BMS.", estimated_minutes: 20, voice_agent_note: "BMS time. Pin 1 is always ground — far left on the connector. Then we go left to right through each cell junction. Tell me when the LED lights up." },
+      { step_number: 12, phase: "Verification", title: "Final voltage check", instruction: "Measure the total pack output voltage at the main terminals. Should read approximately 48V for NMC 14S configuration (14 × 3.6V = 50.4V nominal).", expected_reading: "49-52V DC nominal (healthy NMC 14S pack)", safety_warning: "If reading is significantly off (below 40V or above 55V), disconnect immediately and recheck wiring.", estimated_minutes: 5, voice_agent_note: "Moment of truth. Put your probes on the output terminals and read me the voltage." },
+      { step_number: 13, phase: "Verification", title: "BMS balance check", instruction: "Check the BMS display or app for individual cell voltages. All 14 series cells should show 3.55-3.65V. The BMS should not be flagging any cell.", expected_reading: "14 cells all reading 3.55-3.65V, no BMS faults", safety_warning: null, estimated_minutes: 5, voice_agent_note: "Check each cell on the BMS. All fourteen should be in the 3.55 to 3.65 range. Any outliers?" },
+      { step_number: 14, phase: "Final check", title: "Thermal verification", instruction: "After 10 minutes of rest, use the back of your hand (through gloves) to check for any unusual warmth on module surfaces. All surfaces should be at ambient temperature.", expected_reading: "All modules at ambient temperature — no hot spots", safety_warning: "A warm module after rest indicates internal short or high-resistance connection. Do NOT connect to inverter.", estimated_minutes: 5, voice_agent_note: "Last safety check. Feel each module surface. Everything should be room temperature. Any warmth at all and we stop." },
+    ],
+    post_upcycle_verification: [
+      { test: "Pack voltage", method: "Multimeter at output terminals", expected_result: "49-52V DC", fail_action: "Disconnect, recheck all series connections" },
+      { test: "Cell balance", method: "BMS cell display", expected_result: "All 14 cells 3.55-3.65V", fail_action: "Let BMS balance for 24h, recheck" },
+      { test: "Thermal check", method: "IR thermometer or touch test", expected_result: "All surfaces at ambient temp", fail_action: "Isolate pack, do not connect to load" },
+      { test: "Load test", method: "Apply 500W load for 5 min", expected_result: "Voltage sag < 2V under load", fail_action: "Check for high-resistance connections" },
+    ],
+    estimated_total_time_hours: 3.0,
+    difficulty_level: "Intermediate",
+    gemini_engineering_notes: "This Nissan Leaf Gen 2 pack is well-suited for 48V repurposing due to its modular design and NMC chemistry. Module 3 and 7 are excluded based on telemetry anomalies — Module 3 for internal resistance growth suggesting dendrite formation, Module 7 for physical swelling detected on visual inspection. The remaining 5 modules provide sufficient cell count for a 14S2P topology with 4.8kWh usable capacity, suitable for a residential solar buffer system with Victron-class inverters."
+  }
+};
+
+// ============================================================
+// RENDER FUNCTIONS
+// ============================================================
+
+function renderTargetCard(bp) {
+  const ts = bp.target_system;
+  document.getElementById('target-card').innerHTML = `
+    <div class="stat"><div class="stat-label">Topology</div><div class="stat-value accent">${ts.topology}</div></div>
+    <div class="stat"><div class="stat-label">Target voltage</div><div class="stat-value">${ts.target_voltage}V</div></div>
+    <div class="stat"><div class="stat-label">Capacity</div><div class="stat-value">${ts.target_capacity_kwh} kWh</div></div>
+    <div class="stat"><div class="stat-label">Output power</div><div class="stat-value">${ts.estimated_output_power_w}W</div></div>
+    <div class="stat"><div class="stat-label">Lifespan</div><div class="stat-value green">${ts.estimated_lifespan_years} years</div></div>
+    <div class="stat"><div class="stat-label">Difficulty</div><div class="stat-value">${bp.difficulty_level}</div></div>
+    <div class="topology-explain">${ts.topology_explanation}</div>
+  `;
+}
+
+function renderModules(modules) {
+  document.getElementById('modules-grid').innerHTML = modules.map(m => `
+    <div class="mod-card ${m.status.toLowerCase()}">
+      <div class="mod-name">${m.module_id}</div>
+      <div class="mod-status" style="color:var(--${m.status === 'Keep' ? 'green' : m.status === 'Bypass' ? 'red' : 'amber'})">${m.status.toUpperCase()} · ${m.cell_voltage_expected}V</div>
+      <div class="mod-reason">${m.reason}</div>
+    </div>
+  `).join('');
+}
+
+let activeStep = 0;
+function renderSteps(steps) {
+  const container = document.getElementById('steps-container');
+  container.innerHTML = steps.map((s, i) => `
+    <div class="step-item ${i === 0 ? 'active' : ''}" data-idx="${i}" onclick="setActiveStep(${i})">
+      <div class="step-header">
+        <div class="step-num">${s.step_number}</div>
+        <div style="flex:1">
+          <div class="step-phase">${s.phase}</div>
+          <div class="step-title">${s.title}</div>
+        </div>
+        <div class="step-time">${s.estimated_minutes}m</div>
+      </div>
+      <div class="step-body">
+        <div class="step-instruction">${s.instruction}</div>
+        <div class="step-meta">
+          ${s.expected_reading ? `<div class="step-reading">${s.expected_reading}</div>` : ''}
+          ${s.safety_warning ? `<div class="step-warning">${s.safety_warning}</div>` : ''}
+          ${s.voice_agent_note ? `<div class="step-voice">${s.voice_agent_note}</div>` : ''}
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function setActiveStep(idx) {
+  activeStep = idx;
+  document.querySelectorAll('.step-item').forEach((el, i) => {
+    el.classList.toggle('active', i === idx);
+    el.classList.toggle('done', i < idx);
+  });
+}
+
+function renderTools(tools) {
+  document.getElementById('tools-list').innerHTML = tools.map(t => `
+    <div class="tool-item">
+      <span class="tool-name">${t.tool}</span>
+      <span class="tool-spec">${t.specification}</span>
+      <span class="tool-purpose">${t.purpose}</span>
+    </div>
+  `).join('');
+}
+
+function renderParts(parts) {
+  document.getElementById('parts-list').innerHTML = parts.map(p => `
+    <div class="part-item">
+      <span class="tool-name">${p.part} × ${p.quantity}</span>
+      <span class="tool-spec">${p.specification}</span>
+      <span class="tool-purpose">${p.purpose}</span>
+    </div>
+  `).join('');
+}
+
+let checkCount = 0;
+function renderChecklist(items) {
+  const el = document.getElementById('checklist');
+  el.innerHTML = items.map((item, i) => `
+    <div class="check-item">
+      <div class="check-box" data-idx="${i}" onclick="toggleCheck(this)"></div>
+      <span>${item}</span>
+    </div>
+  `).join('');
+  checkCount = 0;
+}
+
+function toggleCheck(box) {
+  const wasChecked = box.classList.contains('checked');
+  box.classList.toggle('checked');
+  checkCount += wasChecked ? -1 : 1;
+  const total = SAMPLE_BLUEPRINT.blueprint.pre_upcycle_checklist.length;
+  document.getElementById('ready-btn').disabled = checkCount < total;
+}
+
+function renderVerification(items) {
+  if (!items || !items.length) return;
+  document.getElementById('verification-section').style.display = 'block';
+  const tbody = document.querySelector('#verification-table tbody');
+  tbody.innerHTML = items.map(v => `
+    <tr>
+      <td style="font-weight:500">${v.test}</td>
+      <td>${v.method}</td>
+      <td style="color:var(--green)">${v.expected_result}</td>
+      <td style="color:var(--red)">${v.fail_action}</td>
+    </tr>
+  `).join('');
+}
+
+function renderNotes(notes) {
+  if (!notes) return;
+  document.getElementById('notes-section').style.display = 'block';
+  document.getElementById('eng-notes').textContent = notes;
+}
+
+function startVoiceAgent() {
+  alert('ElevenLabs Safety Foreman voice agent would activate here.\n\nIn production, this calls:\n  PATCH /api/batteries/<id>/safety\n  { action: "advance", confirmed_by: "technician" }\n\nThen the voice agent begins walking through each step.');
+}
+
+// ============================================================
+// THREE.JS — 3D MODULE VISUALIZATION
+// ============================================================
+
+function init3D(modules) {
+  const container = document.getElementById('three-container');
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x080c14);
+
+  const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
+  camera.position.set(5, 4, 7);
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(w, h);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.insertBefore(renderer.domElement, container.firstChild);
+
+  // Lighting
+  const ambient = new THREE.AmbientLight(0x404060, 0.6);
+  scene.add(ambient);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(5, 8, 5);
+  scene.add(dirLight);
+  const pointLight = new THREE.PointLight(0x22d3ee, 0.4, 20);
+  pointLight.position.set(-3, 3, 3);
+  scene.add(pointLight);
+
+  // Grid
+  const grid = new THREE.GridHelper(10, 20, 0x1e293b, 0x111827);
+  grid.position.y = -1.5;
+  scene.add(grid);
+
+  // Module colors
+  const colorMap = {
+    Keep: 0x22c55e,
+    Bypass: 0xef4444,
+    Replace: 0xf59e0b,
+  };
+
+  // Create modules as rectangular prisms
+  const moduleGroup = new THREE.Group();
+  const moduleWidth = 1.0;
+  const moduleHeight = 0.6;
+  const moduleDepth = 1.8;
+  const gap = 0.15;
+  const totalModules = modules.length;
+  const cols = Math.ceil(totalModules / 2);
+
+  modules.forEach((m, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+
+    const geo = new THREE.BoxGeometry(moduleWidth, moduleHeight, moduleDepth);
+    const color = colorMap[m.status] || 0x64748b;
+    const mat = new THREE.MeshPhongMaterial({
+      color: color,
+      transparent: true,
+      opacity: m.status === 'Bypass' ? 0.4 : 0.85,
+      specular: 0x222222,
+      shininess: 30,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    // Position in grid
+    const x = (col - (cols - 1) / 2) * (moduleWidth + gap);
+    const y = row * (moduleHeight + gap);
+    const z = 0;
+    mesh.position.set(x, y, z);
+    moduleGroup.add(mesh);
+
+    // Edge wireframe
+    const edges = new THREE.EdgesGeometry(geo);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x94a3b8, linewidth: 1, transparent: true, opacity: 0.3 });
+    const wireframe = new THREE.LineSegments(edges, lineMat);
+    wireframe.position.copy(mesh.position);
+    moduleGroup.add(wireframe);
+
+    // Busbar connections (thin cylinders between series modules)
+    if (m.status === 'Keep' && i < totalModules - 1 && modules[i + 1]?.status === 'Keep') {
+      const nextCol = (i + 1) % cols;
+      const nextRow = Math.floor((i + 1) / cols);
+      if (nextRow === row) {
+        const barGeo = new THREE.CylinderGeometry(0.04, 0.04, gap + 0.1, 8);
+        const barMat = new THREE.MeshPhongMaterial({ color: 0xf59e0b, shininess: 80, specular: 0x444444 });
+        const bar = new THREE.Mesh(barGeo, barMat);
+        bar.rotation.z = Math.PI / 2;
+        bar.position.set((x + (nextCol - (cols - 1) / 2) * (moduleWidth + gap)) / 2, y, 0.6);
+        moduleGroup.add(bar);
+      }
+    }
+  });
+
+  // Center the group
+  moduleGroup.position.y = 0;
+  scene.add(moduleGroup);
+
+  // Simple orbit controls (manual)
+  let isDragging = false;
+  let prevX = 0, prevY = 0;
+  let rotX = 0.3, rotY = 0;
+  let zoom = 7;
+
+  container.addEventListener('mousedown', (e) => { isDragging = true; prevX = e.clientX; prevY = e.clientY; });
+  container.addEventListener('mouseup', () => isDragging = false);
+  container.addEventListener('mouseleave', () => isDragging = false);
+  container.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    rotY += (e.clientX - prevX) * 0.005;
+    rotX += (e.clientY - prevY) * 0.005;
+    rotX = Math.max(-1, Math.min(1.2, rotX));
+    prevX = e.clientX; prevY = e.clientY;
+  });
+  container.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    zoom = Math.max(3, Math.min(15, zoom + e.deltaY * 0.01));
+  }, { passive: false });
+
+  // Touch support
+  container.addEventListener('touchstart', (e) => { isDragging = true; prevX = e.touches[0].clientX; prevY = e.touches[0].clientY; });
+  container.addEventListener('touchend', () => isDragging = false);
+  container.addEventListener('touchmove', (e) => {
+    if (!isDragging || !e.touches[0]) return;
+    rotY += (e.touches[0].clientX - prevX) * 0.005;
+    rotX += (e.touches[0].clientY - prevY) * 0.005;
+    rotX = Math.max(-1, Math.min(1.2, rotX));
+    prevX = e.touches[0].clientX; prevY = e.touches[0].clientY;
+  });
+
+  function animate() {
+    requestAnimationFrame(animate);
+    rotY += 0.002; // gentle auto-rotate
+    camera.position.x = Math.sin(rotY) * Math.cos(rotX) * zoom;
+    camera.position.y = Math.sin(rotX) * zoom * 0.6 + 2;
+    camera.position.z = Math.cos(rotY) * Math.cos(rotX) * zoom;
+    camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // Resize handler
+  window.addEventListener('resize', () => {
+    const nw = container.clientWidth;
+    const nh = container.clientHeight;
+    camera.aspect = nw / nh;
+    camera.updateProjectionMatrix();
+    renderer.setSize(nw, nh);
+  });
+}
+
+// ============================================================
+// INIT
+// ============================================================
+
+const data = SAMPLE_BLUEPRINT;
+const bp = data.blueprint;
+
+renderTargetCard(bp);
+renderModules(bp.module_assessment);
+renderSteps(bp.upcycle_steps);
+renderTools(bp.required_tools);
+renderParts(bp.required_parts);
+renderChecklist(bp.pre_upcycle_checklist);
+renderVerification(bp.post_upcycle_verification);
+renderNotes(bp.gemini_engineering_notes);
+init3D(bp.module_assessment);
+
+</script>
+</body>
+</html>
