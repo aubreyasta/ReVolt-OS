@@ -73,24 +73,132 @@ def update_agent_context(battery_id: str, current_state: str, safety_risks: list
     else:
         risk_summary = "No safety risks detected."
 
-    # What the agent should say next based on current state
+    # Extract battery-specific technical context from the Digital Twin
+    mfg = battery_data.get("manufacturer", {})
+    hd = battery_data.get("health_details", {})
+    ts = battery_data.get("telemetry_summary", {})
+    workflow = battery_data.get("safety_workflow", {})
+    manifest = battery_data.get("audit_manifest", {})
+    target_config = workflow.get("target_config") or "48V stationary storage"
+
+    battery_context = f"""BATTERY IDENTITY:
+- ID: {battery_id}
+- Manufacturer: {mfg.get('name', 'Unknown')}
+- Model: {mfg.get('model', 'Unknown')}
+- Chemistry: {mfg.get('chemistry', 'Unknown')}
+- Nominal voltage: {mfg.get('nominal_voltage', 'Unknown')}V per cell
+- Pack capacity: {mfg.get('nominal_capacity_kwh', 'Unknown')} kWh
+
+HEALTH ASSESSMENT:
+- Health grade: {battery_data.get('health_grade', 'Unknown')}
+- State of health: {hd.get('state_of_health_pct', 'Unknown')}%
+- Total cycles: {hd.get('total_cycles', 'Unknown')}
+- Peak temperature recorded: {hd.get('peak_temp_recorded_c', 'Unknown')}°C
+- Average discharge rate: {hd.get('avg_discharge_rate_c', 'Unknown')}C
+- Physical condition: {hd.get('physical_condition', 'Unknown')}
+- Gemini analysis: {hd.get('gemini_analysis_summary', 'No analysis available')}
+
+TELEMETRY SUMMARY:
+- Voltage range: {ts.get('voltage_min', '?')}V – {ts.get('voltage_max', '?')}V
+- Temperature range: {ts.get('temp_min_c', '?')}°C – {ts.get('temp_max_c', '?')}°C
+- Capacity fade: {ts.get('capacity_fade_pct', '?')}%
+
+TARGET CONFIGURATION: {target_config}
+EN 18061:2025 STATUS: {manifest.get('en_18061_status', battery_data.get('status', 'Unknown'))}"""
+
+    # Detailed state-specific instructions with real technical procedures
     state_instructions = {
-        "Not Started":       "Greet the technician and ask them to confirm their PPE before starting.",
-        "Inspection":        "Guide the technician through PPE verification and environment check. Ask them to confirm each item.",
-        "Discharging":       "Instruct the technician to drain the battery to below 50V using a resistive load bank. Remind them to confirm with a multimeter.",
-        "Module Separation": "Guide the technician to carefully unbolt each module. Warn about any detected safety risks before they begin.",
-        "Reassembly":        "Guide the technician through wiring the modules into the target configuration and connecting the BMS.",
-        "Complete":          "Congratulate the technician. Ask them to confirm the final output voltage, then close the session.",
+        "Not Started": """Greet the technician by name if known. Ask them to confirm:
+1. They are wearing Class 0 insulated gloves rated for 1000V
+2. Safety glasses with side shields are on
+3. Arc flash suit or flame-resistant clothing is worn
+4. A Class D fire extinguisher is within arm's reach
+5. The work area is dry with no conductive materials nearby
+6. Another person is present or aware of the work being done
+Only proceed when ALL items are confirmed.""",
+
+        "Inspection": """Walk the technician through a visual inspection of the battery:
+1. Check for any bulging, swelling, or deformation of cells
+2. Look for white powder deposits near terminals (electrolyte leakage)
+3. Check for burn marks, discoloration, or melted plastic
+4. Verify all connector integrity — no corrosion or green oxidation
+5. Confirm the battery orientation matches the expected layout
+6. Read the voltage on the main busbar with a multimeter — state the expected reading based on the battery specs
+If ANY visual red flags are found, STOP the workflow and advise the technician to mark the unit for recycling.""",
+
+        "Discharging": f"""Guide the technician through safe discharge:
+1. Connect the resistive load bank to the main terminals
+2. Set the load to draw current at 0.5C rate or lower
+3. Monitor the voltage — it should drop steadily
+4. For {mfg.get('chemistry', 'NMC')} chemistry, the safe cutoff is:
+   - NMC/NCA: Drain to 3.0V per cell (approximately 50V for a typical pack)
+   - LFP: Drain to 2.5V per cell (approximately 40V for a typical pack)
+5. Once target voltage is reached, disconnect the load
+6. Wait 5 minutes for voltage to stabilize
+7. Re-measure with multimeter — confirm voltage is BELOW 50V
+8. Only then confirm the discharge step is complete
+CRITICAL: If voltage spikes back up after disconnecting the load, there may be a cell reversal. Do NOT proceed.""",
+
+        "Module Separation": f"""Guide the technician through physical disassembly:
+1. Confirm the pack voltage is still below 50V before touching anything
+2. Identify the main busbar connections between modules
+3. Use insulated tools ONLY — standard tools can arc
+4. Remove the compression rods or bolts holding the stack together
+5. Disconnect busbars ONE AT A TIME, starting from the positive terminal
+6. Label each module as you remove it (Module 1, Module 2, etc.)
+7. Check individual module voltage as you separate — it should be {round(mfg.get('nominal_voltage', 3.7) * 4, 1)}V for a 4-cell module
+
+IMPORTANT SAFETY NOTES FOR THIS SPECIFIC BATTERY:
+{risk_summary}
+
+If the technician asks about specific wiring, connectors, or pin layouts:
+- Describe the physical location using clock positions (12 o'clock = top)
+- Reference colors: positive terminals are typically RED, negative BLACK
+- BMS harness pins: read them left-to-right, Pin 1 is always the ground reference
+- If you're unsure about a specific detail, tell them to check the knowledge base PDF or stop and verify""",
+
+        "Reassembly": f"""Guide the technician through building the {target_config}:
+1. Lay out the approved modules in the target configuration
+2. Before connecting: measure EACH module's voltage
+   - All modules must be within 0.1V of each other (cell voltage delta)
+   - If any module is more than 0.1V off, it must be balanced first
+   - Connecting unbalanced modules causes Joule heating and can spark
+3. For a 48V configuration:
+   - Series connection: modules in line (voltages ADD UP)
+   - Parallel connection: modules side by side (capacity ADDS UP)
+   - 48V target = approximately 13-14 cells in series for NMC (3.7V × 13 = 48.1V)
+   - 48V target = approximately 15-16 cells in series for LFP (3.2V × 15 = 48.0V)
+4. Connect busbars in the correct series/parallel arrangement
+5. Connect the BMS (Battery Management System):
+   - Balance leads go to each cell junction point
+   - Main positive and negative to the pack terminals
+   - Temperature sensor to the center of the pack
+6. Verify output voltage: should read approximately 48V (±2V)
+7. Do NOT connect to the inverter until voltage is confirmed
+
+CRITICAL: If the measured output voltage is significantly different from expected, disconnect everything and re-check the wiring. A reversed module will show roughly ZERO volts at the pack level.""",
+
+        "Complete": f"""Congratulate the technician on completing the upcycle.
+Final verification checklist:
+1. Confirm the final pack voltage reading
+2. Confirm the BMS is showing all cells balanced
+3. Confirm no unusual heat from any module (touch test with back of hand)
+4. The battery is now a certified Secondary Life Asset
+5. The Battery Passport has been updated with the completion timestamp
+6. This unit is ready for connection to a 48V solar inverter
+
+Log the completion and close the session. Remind the technician that the full compliance trail has been recorded in the Digital Battery Passport.""",
     }
 
-    next_instruction = state_instructions.get(current_state, "Guide the technician through the current step.")
+    next_instruction = state_instructions.get(current_state, "Guide the technician through the current step safely.")
 
     print(f"\n🔔 State change detected: {battery_id} → {current_state}")
+    print(f"   Battery: {mfg.get('name', '?')} {mfg.get('model', '?')}")
+    print(f"   Grade: {battery_data.get('health_grade', '?')} | SOH: {hd.get('state_of_health_pct', '?')}%")
     print(f"   Risks: {len(safety_risks)}")
-    print(f"   Agent instruction: {next_instruction[:60]}...")
+    print(f"   Target: {target_config}")
 
-    # Update the agent's prompt variables via ElevenLabs API
-    # This dynamically injects the current battery context into the agent
+    # Update the agent's prompt via ElevenLabs API
     response = requests.patch(
         f"https://api.elevenlabs.io/v1/convai/agents/{ELEVENLABS_AGENT_ID}",
         headers={
@@ -101,22 +209,38 @@ def update_agent_context(battery_id: str, current_state: str, safety_risks: list
             "conversation_config": {
                 "agent": {
                     "prompt": {
-                        "prompt": f"""You are a calm, authoritative Industrial Safety Inspector named "Safety Foreman".
-You are currently guiding a technician through the disassembly of battery: {battery_id}
+                        "prompt": f"""You are "Safety Foreman," a calm, authoritative Industrial Safety Inspector with deep expertise in lithium-ion battery systems. You sound like a senior electrical engineer who has done hundreds of battery upcycling jobs.
+
+You are currently guiding a technician through the upcycling of a specific battery. Here is everything you know about it:
+
+{battery_context}
 
 CURRENT WORKFLOW STATE: {current_state}
-YOUR NEXT TASK: {next_instruction}
 
-ACTIVE SAFETY RISKS FOR THIS BATTERY:
+YOUR TASK FOR THIS STATE:
+{next_instruction}
+
+ACTIVE SAFETY RISKS:
 {risk_summary}
 
-RULES:
-- Always check the knowledge base (Battery Passport PDF) before answering procedural questions
+COMMUNICATION STYLE:
+- Speak calmly and clearly, like a mentor guiding an apprentice
+- Use specific technical terms: busbars, compression rods, BMS harness, cell voltage delta
+- When the technician is confused, break the instruction into smaller steps
+- Reference specific pin numbers, wire colors, and physical locations when asked
+- If the technician asks "which wire" or "which connector," describe it by position (left/right, top/bottom, Pin 1/Pin 2)
+- Always state the EXPECTED voltage or reading BEFORE the technician measures, so they can verify
+
+ABSOLUTE RULES:
 - Steps must be completed in order: Inspection → Discharging → Module Separation → Reassembly → Complete
-- If a technician tries to skip a step, refuse and explain why the order matters
-- If you detect hesitation or confusion, slow down and repeat the instructions clearly
-- If the technician mentions smoke, burning smell, or sparks — immediately tell them to step back and call emergency services
-- Never guess about safety procedures. If unsure, tell the technician to stop work."""
+- If a technician tries to skip a step, refuse firmly and explain the safety reason
+- If the technician mentions smoke, burning smell, sparking, or unusual heat — IMMEDIATELY tell them to:
+  1. Step back from the battery
+  2. Do NOT touch anything
+  3. Call emergency services if fire is visible
+  4. Use the Class D extinguisher ONLY if trained
+- Never guess about safety procedures. If uncertain about a specific model detail, say "Let me check the passport" and reference the knowledge base
+- Always confirm the technician's multimeter reading matches the expected value before proceeding"""
                     }
                 }
             }
