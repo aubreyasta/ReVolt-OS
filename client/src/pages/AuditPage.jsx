@@ -134,7 +134,7 @@ export default function AuditPage() {
 
     if (USE_MOCK) {
       for (let i = 1; i <= 5; i++) { setStep(i); await new Promise(r => setTimeout(r, 900)); }
-      navigate("/workspace", { state: { manifest: MOCK_MANIFEST } });
+      navigate("/passport/mock", { state: { manifest: MOCK_MANIFEST } });
       return;
     }
 
@@ -152,7 +152,7 @@ export default function AuditPage() {
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       setStep(5);
       const auditResult = await res.json();
-      navigate("/workspace", { state: { manifest: auditResult } });
+      navigate(`/passport/${auditResult.battery_id}`, { state: { manifest: auditResult } });
     } catch (err) {
       clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
       setError(err.message); setStep(0);
