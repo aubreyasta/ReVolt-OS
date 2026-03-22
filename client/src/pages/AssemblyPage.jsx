@@ -111,7 +111,7 @@ function useAudioAnalyser() {
 // =============================================================================
 const BTN_SIZE = 160;
 
-function MicButton({ active, onClick, getFrequency }) {
+function MicButton({ active, pressing, onPressStart, onPressEnd, onClick, getFrequency }) {
   const canvasRef = useRef(null);
   const rafRef = useRef(null);
   const smoothRef = useRef(new Float32Array(64).fill(0));
@@ -131,7 +131,7 @@ function MicButton({ active, onClick, getFrequency }) {
     function draw() {
       ctx.clearRect(0, 0, W, H);
 
-      if (active) {
+      if (pressing) {
         const raw = getFrequency(); // Uint8Array[128], use first 64
         const sm = smoothRef.current;
         for (let i = 0; i < NUM_BARS; i++) {
@@ -146,9 +146,7 @@ function MicButton({ active, onClick, getFrequency }) {
           const x2 = cx + (INNER_R + barH) * Math.cos(angle);
           const y2 = cy + (INNER_R + barH) * Math.sin(angle);
 
-          // Color gradient: green (bottom) -> blue (sides) -> purple (top)
-          // Map angle 0..2PI to hue
-          const hue = ((i / NUM_BARS) * 200 + 140) % 360; // 140=green, 200=blue, 280=purple
+          const hue = ((i / NUM_BARS) * 200 + 140) % 360;
           const alpha = 0.5 + sm[i] * 0.5;
           ctx.strokeStyle = `hsla(${hue}, 100%, 60%, ${alpha})`;
           ctx.lineWidth = (W / NUM_BARS) * 0.55;
@@ -161,12 +159,7 @@ function MicButton({ active, onClick, getFrequency }) {
 
         // Inner glow ring
         const grd = ctx.createRadialGradient(
-          cx,
-          cy,
-          INNER_R * 0.7,
-          cx,
-          cy,
-          INNER_R,
+          cx, cy, INNER_R * 0.7, cx, cy, INNER_R,
         );
         grd.addColorStop(0, "rgba(0,255,136,0.0)");
         grd.addColorStop(1, "rgba(0,255,136,0.12)");
@@ -174,6 +167,15 @@ function MicButton({ active, onClick, getFrequency }) {
         ctx.beginPath();
         ctx.arc(cx, cy, INNER_R, 0, Math.PI * 2);
         ctx.fill();
+      } else if (active) {
+        // Session active but not pressing — subtle breathing ring
+        smoothRef.current = new Float32Array(64).fill(0);
+        const pulse = 0.15 + Math.sin(Date.now() / 600) * 0.08;
+        ctx.strokeStyle = `rgba(0,200,120,${pulse})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, INNER_R + 4, 0, Math.PI * 2);
+        ctx.stroke();
       } else {
         // Idle: subtle dotted ring
         smoothRef.current = new Float32Array(64).fill(0);
@@ -191,39 +193,49 @@ function MicButton({ active, onClick, getFrequency }) {
 
     rafRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [active, getFrequency]);
+  }, [active, pressing, getFrequency]);
 
   return (
     <button
-      onClick={onClick}
+      onClick={!active ? onClick : undefined}
+      onMouseDown={active ? onPressStart : undefined}
+      onMouseUp={active ? onPressEnd : undefined}
+      onMouseLeave={active && pressing ? onPressEnd : undefined}
+      onTouchStart={active ? onPressStart : undefined}
+      onTouchEnd={active ? onPressEnd : undefined}
       style={{
         position: "relative",
         width: BTN_SIZE,
         height: BTN_SIZE,
         borderRadius: "50%",
-        border: `2px solid ${active ? "rgba(0,200,120,0.45)" : "rgba(96,144,192,0.55)"}`,
-        background: active
+        border: `2px solid ${pressing ? "rgba(0,255,136,0.7)" : active ? "rgba(0,200,120,0.45)" : "rgba(96,144,192,0.55)"}`,
+        background: pressing
           ? "radial-gradient(circle at 40% 35%, #0d2318, #040d08)"
-          : "radial-gradient(circle at 40% 35%, #ddeeff, #b8d0ec)",
-        boxShadow: active
-          ? "0 0 24px rgba(0,255,136,0.18), inset 0 0 16px rgba(0,0,0,0.65), 2px 2px 0 rgba(0,0,0,0.4)"
-          : "2px 2px 0 rgba(0,0,0,0.4), -1px -1px 0 rgba(255,255,255,0.85), inset 0 1px 0 rgba(255,255,255,0.55)",
+          : active
+            ? "radial-gradient(circle at 40% 35%, #0a1a12, #030a06)"
+            : "radial-gradient(circle at 40% 35%, #ddeeff, #b8d0ec)",
+        boxShadow: pressing
+          ? "0 0 32px rgba(0,255,136,0.3), inset 0 0 16px rgba(0,0,0,0.65), 2px 2px 0 rgba(0,0,0,0.4)"
+          : active
+            ? "0 0 12px rgba(0,255,136,0.1), inset 0 0 16px rgba(0,0,0,0.65), 2px 2px 0 rgba(0,0,0,0.4)"
+            : "2px 2px 0 rgba(0,0,0,0.4), -1px -1px 0 rgba(255,255,255,0.85), inset 0 1px 0 rgba(255,255,255,0.55)",
         cursor: "pointer",
         overflow: "hidden",
         padding: 0,
-        transition: "background 0.4s, box-shadow 0.4s, border-color 0.4s",
+        transition: "background 0.2s, box-shadow 0.2s, border-color 0.2s",
         flexShrink: 0,
+        userSelect: "none",
+        WebkitUserSelect: "none",
       }}
     >
-      {/* Canvas drawn imperatively -- no React state in the loop */}
       <canvas
         ref={canvasRef}
         width={BTN_SIZE}
         height={BTN_SIZE}
-        style={{ position: "absolute", inset: 0, borderRadius: "50%" }}
+        style={{ position: "absolute", inset: 0, borderRadius: "50%", pointerEvents: "none" }}
       />
 
-      {/* Idle label -- fades out when active */}
+      {/* Label changes based on state */}
       <div
         style={{
           position: "absolute",
@@ -233,8 +245,8 @@ function MicButton({ active, onClick, getFrequency }) {
           alignItems: "center",
           justifyContent: "center",
           gap: 5,
-          opacity: active ? 0 : 1,
-          transition: "opacity 0.3s",
+          opacity: pressing ? 0 : 1,
+          transition: "opacity 0.2s",
           pointerEvents: "none",
           zIndex: 2,
         }}
@@ -242,18 +254,19 @@ function MicButton({ active, onClick, getFrequency }) {
         <span style={{ fontSize: 26, lineHeight: 1 }}>🎙</span>
         <span
           style={{
-            fontSize: 9,
+            fontSize: 8,
             fontFamily: "var(--font-mono)",
-            color: "var(--text-dim)",
+            color: active ? "#00ff88" : "var(--text-dim)",
             letterSpacing: "0.1em",
+            textShadow: active ? "0 0 6px #00ff88" : "none",
           }}
         >
-          TAP TO SPEAK
+          {active ? "HOLD TO TALK" : "TAP TO CONNECT"}
         </span>
       </div>
 
-      {/* Live badge */}
-      {active && (
+      {/* Live badge when pressing */}
+      {pressing && (
         <div
           style={{
             position: "absolute",
@@ -325,6 +338,7 @@ export default function AssemblyPage() {
   // It is never hardcoded here -- the backend reads it from its own .env.
   const [agentId, setAgentId] = useState(null);
   const [agentActive, setAgentActive] = useState(false);
+  const [pressing, setPressing] = useState(false);
   const [done, setDone] = useState(new Set());
   const [completing, setCompleting] = useState(false);
   const [transcript, setTranscript] = useState([
@@ -334,6 +348,7 @@ export default function AssemblyPage() {
     },
   ]);
   const mockIdx = useRef(0);
+  const transcriptRef = useRef(null);
   const { init, destroy, getFrequency } = useAudioAnalyser();
 
   // Stable ref so MicButton's useEffect doesn't re-fire
@@ -374,9 +389,12 @@ export default function AssemblyPage() {
       },
     },
     onMessage: (event) => {
-      // source is "ai" for agent messages, "user" for transcriptions
+      // source is "ai" for agent messages, "user" for user transcriptions
       if (event.source === "ai" && event.message) {
         setTranscript((t) => [...t, { role: "agent", text: event.message }]);
+      }
+      if (event.source === "user" && event.message) {
+        setTranscript((t) => [...t, { role: "user", text: event.message }]);
       }
     },
     onError: (err) => console.error("[ElevenLabs]", err),
@@ -429,6 +447,7 @@ export default function AssemblyPage() {
       await conversation.endSession();
       destroy();
       setAgentActive(false);
+      setPressing(false);
       setTranscript((t) => [...t, { role: "agent", text: "Session ended." }]);
     } else {
       await conversation.startSession({
@@ -451,10 +470,30 @@ export default function AssemblyPage() {
       setAgentActive(true);
       setTranscript((t) => [
         ...t,
-        { role: "agent", text: "Connecting to ElevenLabs..." },
+        { role: "agent", text: "Connected. Hold the mic button to speak." },
       ]);
     }
   }
+
+  // Press-to-talk: hold to unmute, release to mute
+  function handlePressStart(e) {
+    e.preventDefault();
+    setPressing(true);
+    // ElevenLabs useConversation handles mic automatically via WebRTC
+    // The pressing state controls the visual feedback
+  }
+
+  function handlePressEnd(e) {
+    e.preventDefault();
+    setPressing(false);
+  }
+
+  // Auto-scroll transcript to bottom
+  useEffect(() => {
+    if (transcriptRef.current) {
+      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+    }
+  }, [transcript]);
 
   function toggleStep(i) {
     setDone((prev) => {
@@ -558,7 +597,7 @@ export default function AssemblyPage() {
                   fontWeight: "bold",
                 }}
               >
-                {agentActive ? "AGENT ACTIVE" : "AGENT STANDBY"}
+                {pressing ? "LISTENING..." : agentActive ? "AGENT ACTIVE" : "AGENT STANDBY"}
               </span>
             </div>
           </div>
@@ -698,6 +737,9 @@ export default function AssemblyPage() {
               >
                 <MicButton
                   active={agentActive}
+                  pressing={pressing}
+                  onPressStart={handlePressStart}
+                  onPressEnd={handlePressEnd}
                   onClick={toggleAgent}
                   getFrequency={stableFreq}
                 />
@@ -750,15 +792,17 @@ export default function AssemblyPage() {
               >
                 <div style={S.colHeader}>TRANSCRIPT</div>
                 <div
+                  ref={transcriptRef}
                   className="inset-panel"
                   style={{
                     display: "flex",
                     flexDirection: "column",
                     gap: 8,
                     padding: 8,
-                    minHeight: 80,
-                    maxHeight: 180,
+                    minHeight: 120,
+                    maxHeight: 280,
                     overflowY: "auto",
+                    scrollBehavior: "smooth",
                   }}
                 >
                   {transcript.map((msg, i) => (
