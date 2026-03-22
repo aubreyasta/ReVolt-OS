@@ -13,6 +13,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { MOCK_MANIFEST, USE_MOCK } from "../mocks/manifest.mock";
+import BatteryCellDiagram from "../components/BatteryCellDiagram";
 
 const LOADING_STEPS = [
   "Initializing Gemini Vision...",
@@ -69,6 +70,7 @@ export default function AuditPage() {
   const [step, setStep] = useState(0);
   const [error, setError] = useState(null);
   const [genMsg, setGenMsg] = useState(null);
+  const [auditResult, setAuditResult] = useState(null); // stores result after audit
 
   const imageRef = useRef();
   const csvRef = useRef();
@@ -134,7 +136,8 @@ export default function AuditPage() {
 
     if (USE_MOCK) {
       for (let i = 1; i <= 5; i++) { setStep(i); await new Promise(r => setTimeout(r, 900)); }
-      navigate("/passport/mock", { state: { manifest: MOCK_MANIFEST } });
+      setAuditResult(MOCK_MANIFEST);
+      setStep(0);
       return;
     }
 
@@ -151,8 +154,9 @@ export default function AuditPage() {
       clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       setStep(5);
-      const auditResult = await res.json();
-      navigate(`/passport/${auditResult.battery_id}`, { state: { manifest: auditResult } });
+      const data = await res.json();
+      setAuditResult(data);
+      setStep(0);
     } catch (err) {
       clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
       setError(err.message); setStep(0);
@@ -186,6 +190,23 @@ export default function AuditPage() {
           <div style={S.body}>
             {busy ? (
               <LoadingPanel step={step} />
+            ) : auditResult ? (
+              <AuditResultPanel
+                result={auditResult}
+                onViewPassport={() =>
+                  navigate(
+                    auditResult.battery_id === "RVX-2024-00001"
+                      ? "/passport/mock"
+                      : `/passport/${auditResult.battery_id}`,
+                    { state: { manifest: auditResult } }
+                  )
+                }
+                onRunAnother={() => {
+                  setAuditResult(null);
+                  setImage(null); setCsv(null); setImagePrev(null);
+                  setCsvPreview(null); setError(null);
+                }}
+              />
             ) : (
               <>
                 <div style={S.uploadRow}>
@@ -220,20 +241,28 @@ export default function AuditPage() {
 
           <div style={S.bottomBar}>
             <div style={S.statusMsg}>
-              {busy ? `Processing... step ${step}/5` : ready ? "Ready to run audit." : "Select files to continue."}
+              {busy
+                ? `Processing... step ${step}/5`
+                : auditResult
+                ? `Audit complete — ${auditResult.battery_id}`
+                : ready
+                ? "Ready to run audit."
+                : "Select files to continue."}
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button className="aqua-btn" onClick={generateTelemetry} disabled={busy}
-                style={{ background: "linear-gradient(180deg, #fef3cd, #f7dc6f)", borderColor: "#d4ac0d", color: "#7d6608" }}>
-                ⚡ Generate Telemetry
-              </button>
-              <button className="aqua-btn" onClick={() => { setImage(null); setCsv(null); setImagePrev(null); setCsvPreview(null); setError(null); setGenMsg(null); }}>
-                Clear
-              </button>
-              <button className="aqua-btn primary" onClick={submit} disabled={!ready || busy}>
-                Run Audit
-              </button>
-            </div>
+            {!auditResult && (
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="aqua-btn" onClick={generateTelemetry} disabled={busy}
+                  style={{ background: "linear-gradient(180deg, #fef3cd, #f7dc6f)", borderColor: "#d4ac0d", color: "#7d6608" }}>
+                  ⚡ Generate Telemetry
+                </button>
+                <button className="aqua-btn" onClick={() => { setImage(null); setCsv(null); setImagePrev(null); setCsvPreview(null); setError(null); setGenMsg(null); }}>
+                  Clear
+                </button>
+                <button className="aqua-btn primary" onClick={submit} disabled={!ready || busy}>
+                  Run Audit
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -344,6 +373,82 @@ function LoadingPanel({ step }) {
       <div style={{ marginTop: 16 }}>
         <div className="progress-track"><div className="progress-fill" style={{ width: `${(step/5)*100}%` }} /></div>
         <div style={{ textAlign: "right", fontSize: 10, marginTop: 3, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{Math.round((step/5)*100)}%</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── AuditResultPanel ── */
+function AuditResultPanel({ result, onViewPassport, onRunAnother }) {
+  const modules = result?.upcycle_blueprint?.module_assessment ?? [];
+  const grade = result?.health_grade ?? "?";
+  const gradeColor = {
+    A: "var(--green)", B: "var(--aqua-blue,#3b82f6)",
+    C: "var(--amber,#f59e0b)", D: "#f97316", F: "var(--red)",
+  }[grade] ?? "var(--text-dim)";
+
+  const statusLabel = result?.status ?? "Complete";
+  const summary = result?.health_details?.gemini_analysis_summary ?? "";
+  const batteryId = result?.battery_id ?? "—";
+
+  return (
+    <div>
+      {/* Grade + identity banner */}
+      <div className="inset-panel" style={{
+        display: "flex", alignItems: "center", gap: 14, marginBottom: 12,
+        padding: "12px 14px", background: "rgba(255,255,255,0.5)",
+      }}>
+        <div style={{
+          fontSize: 36, fontWeight: 800, color: gradeColor,
+          fontFamily: "var(--font-mono)", lineHeight: 1,
+          minWidth: 40, textAlign: "center",
+        }}>{grade}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 3 }}>
+            Audit Complete
+          </div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)", marginBottom: 4 }}>
+            {batteryId} · {statusLabel}
+          </div>
+          {summary && (
+            <div style={{ fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+              {summary.length > 120 ? summary.slice(0, 120) + "…" : summary}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 3D Battery Cell Diagram — only renders if blueprint module data exists */}
+      {modules.length > 0 ? (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{
+            fontSize: 10, fontWeight: 700, color: "var(--text-dim)",
+            textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 8,
+          }}>
+            Battery Cell Layout — 3D Module View
+          </div>
+          <BatteryCellDiagram modules={modules} />
+        </div>
+      ) : (
+        /* Fallback when backend hasn't returned blueprint data yet */
+        <div className="inset-panel" style={{
+          padding: "14px", marginBottom: 10, background: "rgba(255,255,255,0.35)",
+          fontSize: 11, color: "var(--text-dim)", textAlign: "center", lineHeight: 1.7,
+        }}>
+          <div style={{ fontSize: 16, marginBottom: 4 }}>🔋</div>
+          3D cell diagram will appear here once Gemini generates<br />
+          the upcycle blueprint (Certified batteries only).
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <button className="aqua-btn" onClick={onRunAnother}>
+          ← Run Another Audit
+        </button>
+        <button className="aqua-btn primary" onClick={onViewPassport}>
+          View Full Passport →
+        </button>
       </div>
     </div>
   );
