@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://revolt-42qi.onrender.com/api/:path*"
+      "destination": "https://revolt-os-production.up.railway.app/api/:path*"
     },
     {
       "source": "/(.*)",

@@ -10,3 +10,4 @@ certifi>=2024.2.2
 google-genai>=1.0.0
 requests>=2.31.0
 reportlab>=4.1.0
+gunicorn>=21.2.0
