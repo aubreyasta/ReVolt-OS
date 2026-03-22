@@ -17,7 +17,7 @@ HOW IT USES GEMINI:
   - gemini-3-flash-preview: Multimodal reasoning (photo + CSV analysis)
   - gemini-embedding-001: Converts telemetry into vector embeddings
 
-Run: python scripts/audit.py assets/sample_telemetry.csv tests/battery_sticker.jpg
+Run: python .scripts/audit.py .assets/sample_telemetry.csv .assets/battery_sticker.jpg
 """
 
 from google import genai
@@ -589,7 +589,7 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
     return digital_twin
 
 
-def save_manifest(digital_twin: dict, output_path: str = "assets/manifest.json"):
+def save_manifest(digital_twin: dict, output_path: str = ".assets/manifest.json"):
     """Save the Digital Twin to a local JSON file."""
     with open(output_path, "w") as f:
         json.dump(digital_twin, f, indent=2, default=str)
@@ -608,7 +608,7 @@ def push_to_api(digital_twin: dict):
             print(f"\n⚠ API error {response.status_code}: {response.text}")
     except requests.ConnectionError:
         print(f"\n⚠ Could not connect to API at {API_BASE_URL}")
-        print(f"  Is the Flask server running? (python scripts/api_endpoints.py)")
+        print(f"  Is the Flask server running? (python .scripts/api_endpoints.py)")
 
 
 # ============================================
@@ -664,9 +664,9 @@ def generate_passport_pdf(digital_twin: dict) -> str:
     from reportlab.lib.units import inch
 
     battery_id  = digital_twin["battery_id"]
-    output_path = f"assets/passport_{battery_id}.pdf"
+    output_path = f".assets/passport_{battery_id}.pdf"
 
-    Path("assets").mkdir(exist_ok=True)
+    Path(".assets").mkdir(exist_ok=True)
 
     doc = SimpleDocTemplate(
         output_path, pagesize=letter,
@@ -920,13 +920,14 @@ def upload_to_elevenlabs(pdf_path: str, battery_id: str):
 # ============================================
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python scripts/audit.py <csv_path> [image_path]")
+        print("Usage: python .scripts/audit.py <csv_path> [image_path]")
         print("  csv_path:   Path to the telemetry CSV file (required)")
         print("  image_path: Path to the battery photo (optional)")
         print()
         print("Example:")
-        print("  python scripts/audit.py assets/sample_telemetry.csv tests/battery_sticker.jpg")
-        print("  python scripts/audit.py assets/sample_telemetry.csv  # CSV only")
+        print("  python .scripts/audit.py .assets/sample_telemetry.csv .assets/battery_sticker.jpg")
+        print("  python .scripts/audit.py .tests/good_battery.csv                # CSV only")
+        print("  python .scripts/audit.py .tests/bad_battery.csv                 # Dangerous battery")
         sys.exit(1)
 
     csv_path   = sys.argv[1]

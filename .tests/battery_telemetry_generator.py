@@ -263,19 +263,19 @@ if __name__ == "__main__":
     random.seed(42)  # Fixed seed = same output every run (reproducible demos)
     
     print("\n📗 Generating GOOD battery (Grade A candidate)...")
-    generate_good_battery("good_battery.csv")
+    generate_good_battery(".tests/good_battery.csv")
     
     print("📕 Generating DANGEROUS battery (Grade F — REJECT)...")
-    generate_dangerous_battery("dangerous_battery.csv")
+    generate_dangerous_battery(".tests/bad_battery.csv")
     
     print("=" * 45)
     print("✓ Demo files ready!")
     print()
     print("Demo flow:")
-    print("  1. python audit.py good_battery.csv battery_photo.jpg")
+    print("  1. python .scripts/audit.py .tests/good_battery.csv .assets/battery_sticker.jpg")
     print("     → Gemini certifies it, Grade A, passport generated")
     print()
-    print("  2. python audit.py dangerous_battery.csv battery_photo.jpg")
+    print("  2. python .scripts/audit.py .tests/bad_battery.csv .assets/battery_sticker.jpg")
     print("     → Gemini REJECTS it, Grade F, 'DO NOT UPCYCLE'")
     print()
     print("  This proves the AI actually works — not just a happy-path demo.")

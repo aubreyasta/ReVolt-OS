@@ -11,7 +11,7 @@ HOW IT CONNECTS TO EVERYTHING:
   - Flask API             → the agent calls /api/batteries/:id/safety to log steps
 
 Run this in a separate terminal while the Flask API is also running:
-  python scripts/voice_agent.py
+  python .scripts/voice_agent.py
 
 You need these in your .env file:
   MONGODB_URI=...
@@ -145,7 +145,7 @@ def watch_safety_workflow():
       → Change Stream fires → Agent updates → Agent speaks next instruction
 
     Run this in a separate terminal:
-      python scripts/voice_agent.py
+      python .scripts/voice_agent.py
     """
 
     print("\n🔋 ReVolt OS — ElevenLabs Safety Foreman")
