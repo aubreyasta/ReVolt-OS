@@ -959,8 +959,8 @@ def run_audit_endpoint():
 
     finally:
         # Clean up temp files
-        import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        os.unlink(img_path)
+        os.unlink(csv_path)
 
 
 # ============================================
