@@ -151,10 +151,10 @@ export default function LandingPage() {
 
             <SectionDivider label="THE PROBLEM" />
             <div style={S.statRow}>
-              <Stat val="14M tons" label="Li-ion end-of-life by 2030" color="var(--red)" />
-              <Stat val="70%" label="cheaper — used EV packs" color="var(--green)" />
-              <Stat val="400V" label="lethal pack voltage" color="var(--amber)" />
-              <Stat val="0" label="certification systems today" color="var(--red)" />
+              <Stat val="14M tons" label="Li-ion batteries reaching end-of-life by 2030" color="#dd2222" />
+              <Stat val="70%" label="cheaper than new — used EV packs for home storage" color="#00cc44" />
+              <Stat val="400V" label="lethal pack voltage — needs step-down to 48V" color="#ff9900" />
+              <Stat val="0" label="certification systems for SME upcyclers today" color="#dd2222" />
             </div>
 
             <SectionDivider label="WHO IS THIS FOR" />
@@ -205,17 +205,50 @@ export default function LandingPage() {
             <Feature icon="🔍" title="Audit Page">Multipart upload → single Gemini multimodal call with image + CSV. Full telemetry in-context. Result saved to MongoDB before frontend receives it.</Feature>
             <Callout>React FormData POST → Flask /api/audit → Gemini → MongoDB → JSON manifest back to client.</Callout>
 
-            <Feature icon="📋" title="Battery Passport">Structured passport from the manifest. QR code points to live MongoDB record. Health grades: A = 90%+, B = 80-90%, C = 70-80%, D = 60-70%, F = below 60%.</Feature>
+            <h3 style={S.h3}>📋 The Battery Passport</h3>
+            <p style={S.p}>
+              Manifest JSON rendered as a structured passport. Fields: manufacturer, chemistry,
+              health grade A-F, SOH%, total cycles, peak temp, RUL, and the full blueprint.
+              QR code points to live MongoDB record — current status, not a static snapshot.
+            </p>
+            <Callout>
+              A = 90%+ SOH, B = 80-90%, C = 70-80%, D = 60-70%, F = below 60%.
+              Grade B is the sweet spot for home energy storage repurposing.
+            </Callout>
 
-            <Feature icon="🗺️" title="Upcycle Blueprint">Engineering spec: target config (14S2P for 48V), cell blocks to bypass with reasoning, expected voltages, step-by-step assembly with multimeter readings.</Feature>
+            <h3 style={S.h3}>🗺️ The Upcycle Blueprint</h3>
+            <p style={S.p}>
+              Gemini produces an engineering spec: target cell config (e.g. 14S2P for 48V),
+              cell blocks to bypass with reasoning, expected output voltage, estimated capacity,
+              step-by-step assembly with expected multimeter readings at each point.
+            </p>
 
-            <Feature icon="🎙️" title="Assembly Page">ElevenLabs agent pre-loaded with battery's passport data. Knows ID, grade, voltage checkpoints, flagged cells. Steps cannot be skipped.</Feature>
+            <h3 style={S.h3}>🎙️ The Assembly Page</h3>
+            <p style={S.p}>
+              ElevenLabs agent initialized with a dynamic prompt built from the battery's
+              passport data. Before the session starts, the agent knows the battery ID, grade,
+              voltage checkpoints, and flagged cells. Steps cannot be skipped — enforced server-side.
+            </p>
 
             <SectionDivider label="THE STACK" />
-            <H2>Integration</H2>
-            <Feature icon="🍃" title="MongoDB Atlas">Full manifest + behavior_embedding (float[3072]). Atlas Vector Search for cosine similarity. Change Streams for auto compliance updates.</Feature>
-            <Feature icon="⚛️" title="React + Vite + Router">Data flows via location.state. Design system: CSS variables. Zero UI library deps.</Feature>
-            <Feature icon="🐍" title="Flask on Railway">POST /api/audit, GET /api/batteries/:id, GET /api/batteries/:id/passport, PATCH /api/batteries/:id/status.</Feature>
+            <H2>Integration details</H2>
+
+            <Feature icon="🍃" title="MongoDB Atlas — schema + vector layer">
+              Each battery document stores the full manifest plus a behavior_embedding
+              field (float[3072]). Atlas Vector Search enables cosine similarity queries.
+              Change Streams watch assembly_record for auto EU compliance updates.
+            </Feature>
+
+            <Feature icon="⚛️" title="Frontend — React + Vite + React Router">
+              Inter-page data via React Router location.state. Design system: 100% CSS
+              variables — macOS Aqua chrome. Zero UI library dependencies.
+            </Feature>
+
+            <Feature icon="🐍" title="Backend — Python + Flask on Railway">
+              POST /api/audit (full pipeline), GET /api/batteries/:id (agent webhook),
+              GET /api/batteries/:id/passport (lighter for UI),
+              PATCH /api/batteries/:id/status (assembly updates).
+            </Feature>
 
             <div style={{ height: 16 }} />
             <div style={{ display: "flex", gap: 8 }}>
