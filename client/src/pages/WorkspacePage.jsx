@@ -1,18 +1,24 @@
 /* =============================================================================
    pages/WorkspacePage.jsx — Three-panel workspace (v2)
+   
+   Fixes:
+   1. Right panel (agent) is ALSO resizable via drag handle
+   2. Grade badge is large + color-prominent
+   3. Default layout: passport & diagram each take ~half of remaining space
+      (agent panel starts at 310px, all three panels resizable)
+   4. Scannable QR code linking to passport PDF
    ============================================================================= */
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useConversation } from "@elevenlabs/react";
 import QRCode from "react-qr-code";
 
-/* ── Safe renderer: never lets an object/array slip into JSX ── */
+// Add this near the top of WorkspacePage.jsx, before the components
 const safe = (val) => {
   if (val === null || val === undefined) return "—";
-  if (Array.isArray(val)) return val.join(", ");
   if (typeof val === "object") return JSON.stringify(val);
-  return String(val);
+  return val;
 };
 
 const SAFETY_STEPS = [
@@ -42,49 +48,49 @@ function PassportSidebar({ manifest, width }) {
   const risks = manifest.safety_risks ?? [];
   const workflow = manifest.safety_workflow ?? {};
   const am = manifest.audit_manifest ?? {};
-  const grade = safe(manifest.health_grade ?? "?");
+  const grade = manifest.health_grade ?? "?";
   const gradeColor = GRADE_COLORS[grade] ?? GRADE_COLORS[grade[0]] ?? "#777";
   const rej = grade[0] === "F" || grade[0] === "D";
 
   const STATUS_LED = { Certified: "green", Listed: "green", "Under Review": "amber", "Disassembly Started": "amber", Sold: "gray" };
-  const statusStr = safe(manifest.status ?? "Listed");
-  const statusLed = Object.keys(STATUS_LED).find(k => statusStr.includes(k))
-    ? STATUS_LED[Object.keys(STATUS_LED).find(k => statusStr.includes(k))]
-    : "green";
+  const statusLed = STATUS_LED[manifest.status] ?? "green";
 
-  const passportUrl = window.location.origin + "/passport/" + safe(manifest.battery_id ?? "unknown");
+  // QR code URL — points to the passport page which can be printed as PDF
+  const passportUrl = window.location.origin + "/passport/" + (manifest.battery_id ?? "unknown");
+
+console.log("manifest keys:", JSON.stringify(manifest, null, 2));
 
   return (
     <div style={{ width, height: "100%", overflowY: "auto", padding: 12, background: "var(--win-bg)", borderRight: "1px solid var(--win-border)", fontSize: 11, color: "var(--text-dim)" }}>
-
-      {/* ── Grade badge ── */}
+      
+      {/* ── Large grade badge ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
         <div style={{
           width: 64, height: 64, borderRadius: "var(--radius-lg)",
           background: `linear-gradient(135deg, ${gradeColor}, ${gradeColor}dd)`,
           display: "flex", alignItems: "center", justifyContent: "center",
           color: "#fff", fontWeight: 800, fontSize: 28,
-          boxShadow: `0 4px 12px ${gradeColor}40`, flexShrink: 0,
+          boxShadow: `0 4px 12px ${gradeColor}40`,
+          flexShrink: 0,
         }}>
           {grade}
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{safe(manifest.battery_id)}</div>
-          <div style={{ fontSize: 10, color: "var(--text-dim)" }}>{safe(mfg.name ?? "Unknown")} · {safe(mfg.chemistry ?? "—")}</div>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{manifest.battery_id}</div>
+          <div style={{ fontSize: 10, color: "var(--text-dim)" }}>{mfg.name ?? "Unknown"} · {mfg.chemistry ?? "—"}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3 }}>
             <div className={`led ${statusLed}`} />
-            <span style={{ fontSize: 10, fontWeight: 700, color: rej ? "var(--red)" : "var(--green)" }}>{statusStr.toUpperCase()}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: rej ? "var(--red)" : "var(--green)" }}>{(manifest.status ?? "Listed").toUpperCase()}</span>
           </div>
         </div>
       </div>
 
       {/* ── Health stats ── */}
       <div className="inset-panel" style={{ padding: 8, marginBottom: 8 }}>
-        {[
-          ["SOH", safe(hd.state_of_health_pct ?? "?") + "%", (hd.state_of_health_pct ?? 100) < 70],
-          ["Cycles", safe(hd.total_cycles ?? "?"), false],
-          ["RUL", safe(hd.remaining_useful_life_years ?? "?") + " yr", false],
-          ["Peak T", safe(hd.peak_temp_recorded_c ?? "?") + "°C", (hd.peak_temp_recorded_c ?? 0) > 55],
+        {[["SOH", (hd.state_of_health_pct ?? "?") + "%", hd.state_of_health_pct < 70],
+          ["Cycles", hd.total_cycles, false],
+          ["RUL", (hd.remaining_useful_life_years ?? "?") + " yr", false],
+          ["Peak T", (hd.peak_temp_recorded_c ?? "?") + "°C", hd.peak_temp_recorded_c > 55],
         ].map(([l, v, warn], i) => (
           <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "3px 0", borderBottom: "1px solid rgba(138,155,176,0.1)" }}>
             <span>{l}</span>
@@ -96,7 +102,7 @@ function PassportSidebar({ manifest, width }) {
       {/* Gemini summary */}
       {hd.gemini_analysis_summary && (
         <div className="inset-panel" style={{ padding: 8, marginBottom: 8, fontSize: 10, lineHeight: 1.65 }}>
-          {safe(hd.gemini_analysis_summary)}
+          {hd.gemini_analysis_summary}
         </div>
       )}
 
@@ -105,14 +111,7 @@ function PassportSidebar({ manifest, width }) {
         <div className="inset-panel" style={{ padding: 8, marginBottom: 8 }}>
           <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text-dim)", letterSpacing: "0.1em", marginBottom: 4 }}>TELEMETRY</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, fontSize: 9 }}>
-            {[
-              ["V min", safe(ts.voltage_min)],
-              ["V max", safe(ts.voltage_max)],
-              ["V avg", safe(ts.voltage_mean)],
-              ["T min", safe(ts.temp_min_c) + "°"],
-              ["T max", safe(ts.temp_max_c) + "°"],
-              ["T avg", safe(ts.temp_mean_c) + "°"],
-            ].map(([l, v], i) => (
+            {[["V min", ts.voltage_min], ["V max", ts.voltage_max], ["V avg", ts.voltage_mean], ["T min", ts.temp_min_c + "°"], ["T max", ts.temp_max_c + "°"], ["T avg", ts.temp_mean_c + "°"]].map(([l, v], i) => (
               <div key={i} style={{ textAlign: "center", padding: "3px 0", background: "rgba(255,255,255,0.35)", borderRadius: 3 }}>
                 <div style={{ color: "var(--text-dim)", fontSize: 8 }}>{l}</div>
                 <div style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--text)" }}>{v}</div>
@@ -124,13 +123,13 @@ function PassportSidebar({ manifest, width }) {
 
       {/* Safety risks */}
       {risks.length > 0 && risks.map((r, i) => {
-        const sev = safe(r.severity ?? r.sev ?? "").toUpperCase();
+        const sev = (r.severity ?? r.sev ?? "").toUpperCase();
         const isHigh = sev.includes("CRIT") || sev.includes("HIGH");
         return (
           <div key={i} className="inset-panel" style={{ padding: 8, marginBottom: 4, borderLeft: `3px solid ${isHigh ? "var(--red)" : "var(--amber)"}` }}>
             <span style={{ fontSize: 9, fontWeight: 700, color: isHigh ? "var(--red)" : "var(--amber)" }}>{sev}</span>
-            <span style={{ fontWeight: 600, color: "var(--text)", marginLeft: 4 }}>{safe(r.risk_type ?? r.type ?? "")}</span>
-            <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>{safe(r.description ?? r.d ?? "")}</div>
+            <span style={{ fontWeight: 600, color: "var(--text)", marginLeft: 4 }}>{r.risk_type ?? r.type}</span>
+            <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>{r.description ?? r.d}</div>
           </div>
         );
       })}
@@ -139,15 +138,7 @@ function PassportSidebar({ manifest, width }) {
       {workflow.target_config && (
         <div className="inset-panel" style={{ padding: 8, marginTop: 6, borderLeft: "3px solid var(--green)" }}>
           <div style={{ fontSize: 9, fontWeight: 700, color: "var(--green)", letterSpacing: "0.1em" }}>TARGET CONFIG</div>
-          <div style={{ fontWeight: 600, color: "var(--text)", marginTop: 2 }}>{safe(workflow.target_config)}</div>
-        </div>
-      )}
-
-      {/* Recommended use */}
-      {am.recommended_use && (
-        <div className="inset-panel" style={{ padding: 8, marginTop: 6, borderLeft: "3px solid var(--aqua-blue)" }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: "var(--aqua-blue)", letterSpacing: "0.1em" }}>RECOMMENDED USE</div>
-          <div style={{ fontWeight: 600, color: "var(--text)", marginTop: 2 }}>{safe(am.recommended_use)}</div>
+          <div style={{ fontWeight: 600, color: "var(--text)", marginTop: 2 }}>{workflow.target_config}</div>
         </div>
       )}
 
@@ -158,14 +149,7 @@ function PassportSidebar({ manifest, width }) {
         </div>
       )}
 
-      {/* EN status */}
-      {am.en_18061_status && (
-        <div style={{ marginTop: 4 }}>
-          <span style={{ fontSize: 9, background: "rgba(5,150,105,0.08)", color: "var(--green)", padding: "1px 7px", borderRadius: 3, border: "1px solid rgba(5,150,105,0.2)" }}>{safe(am.en_18061_status)}</span>
-        </div>
-      )}
-
-      {/* QR Code */}
+      {/* ── QR Code — links to passport page for PDF export ── */}
       <div className="inset-panel" style={{ padding: 10, marginTop: 10, textAlign: "center" }}>
         <div style={{ fontSize: 9, fontWeight: 700, color: "var(--text-dim)", letterSpacing: "0.1em", marginBottom: 6 }}>SCAN FOR PASSPORT PDF</div>
         <div style={{ background: "#fff", padding: 8, borderRadius: "var(--radius-sm)", display: "inline-block" }}>
@@ -199,9 +183,9 @@ function CenterPanel({ blueprint, modules, sel, onSel }) {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--win-bg)", overflow: "hidden" }}>
       <div style={{ padding: "6px 12px", background: "rgba(220,227,236,0.85)", borderBottom: "1px solid rgba(138,155,176,0.2)", display: "flex", gap: 14, alignItems: "center", fontSize: 10, flexShrink: 0 }}>
-        <span style={{ fontWeight: 700, color: "var(--text)" }}>{safe(ts.topology ?? "—")}</span>
-        <span style={{ color: "var(--text-dim)" }}>{safe(ts.target_voltage ?? "?")}V · {safe(ts.target_capacity_kwh ?? "?")} kWh</span>
-        <span style={{ color: "var(--text-dim)" }}>{safe(ts.name ?? "")}</span>
+        <span style={{ fontWeight: 700, color: "var(--text)" }}>{ts.topology ?? "—"}</span>
+        <span style={{ color: "var(--text-dim)" }}>{ts.target_voltage ?? "?"}V · {ts.target_capacity_kwh ?? "?"} kWh</span>
+        <span style={{ color: "var(--text-dim)" }}>{ts.name ?? ""}</span>
       </div>
       <div style={{ flex: 1, position: "relative", minHeight: 180, borderBottom: "1px solid var(--win-border)" }}>
         <ThreeViewer modules={modules} sel={sel} onSel={onSel} />
@@ -216,15 +200,14 @@ function CenterPanel({ blueprint, modules, sel, onSel }) {
             {["Module","Status","SOH","Notes"].map(h=><th key={h} style={{textAlign:"left",padding:"5px 10px",fontSize:9,color:"var(--text-dim)",textTransform:"uppercase",letterSpacing:0.5,borderBottom:"1px solid rgba(138,155,176,0.2)",fontWeight:700}}>{h}</th>)}
           </tr></thead>
           <tbody>{modules.map((mod,i)=>{
-            const st = safe(mod.status ?? "Keep").toLowerCase();
-            const isK = st.includes("keep"); const isB = st.includes("bypass");
-            const stC = isB?"var(--red)":isK?"var(--green)":"var(--amber)";
-            const stBg = isB?"rgba(192,57,43,0.08)":isK?"rgba(30,132,73,0.08)":"rgba(183,112,10,0.08)";
+            const st=(mod.status??"Keep").toLowerCase();const isK=st.includes("keep");const isB=st.includes("bypass");
+            const stC=isB?"var(--red)":isK?"var(--green)":"var(--amber)";
+            const stBg=isB?"rgba(192,57,43,0.08)":isK?"rgba(30,132,73,0.08)":"rgba(183,112,10,0.08)";
             return <tr key={i} onClick={()=>onSel(i===sel?null:i)} style={{cursor:"pointer",background:i===sel?"rgba(40,96,160,0.08)":"transparent",borderBottom:"1px solid rgba(138,155,176,0.1)"}}>
-              <td style={{padding:"4px 10px",fontWeight:700,color:"var(--text)"}}>{safe(mod.module_id ?? mod.module_number ?? mod.module ?? (i+1))}</td>
-              <td style={{padding:"4px 10px"}}><span style={{padding:"1px 6px",borderRadius:3,fontSize:9,fontWeight:600,background:stBg,color:stC}}>{safe(mod.status ?? "Keep")}</span></td>
-              <td style={{padding:"4px 10px",fontFamily:"var(--font-mono)",color:"var(--text)"}}>{safe(mod.soh_pct ?? mod.soh ?? "?")}%</td>
-              <td style={{padding:"4px 10px",color:"var(--text-dim)",fontSize:10}}>{safe(mod.reason ?? mod.notes ?? mod.n ?? "—")}</td>
+              <td style={{padding:"4px 10px",fontWeight:700,color:"var(--text)"}}>M{mod.module_number??mod.module??i+1}</td>
+              <td style={{padding:"4px 10px"}}><span style={{padding:"1px 6px",borderRadius:3,fontSize:9,fontWeight:600,background:stBg,color:stC}}>{mod.status??"Keep"}</span></td>
+              <td style={{padding:"4px 10px",fontFamily:"var(--font-mono)",color:"var(--text)"}}>{mod.soh_pct??mod.soh??"?"}%</td>
+              <td style={{padding:"4px 10px",color:"var(--text-dim)",fontSize:10}}>{mod.reason??mod.notes??mod.n??"—"}</td>
             </tr>})}</tbody>
         </table>
       </div>
@@ -249,7 +232,7 @@ function ThreeViewer({ modules, sel, onSel }) {
       const cMap={Keep:0x27ae60,Bypass:0xe74c3c,Replace:0xf39c12,Monitor:0xf39c12};
       const group=new THREE.Group(),meshes=[],mW=1.05,mH=0.5,mD=1.65,gap=0.16,cols=Math.ceil(modules.length/2);
       modules.forEach((mod,i)=>{
-        const col=i%cols,row=Math.floor(i/cols),st=safe(mod.status??"Keep");
+        const col=i%cols,row=Math.floor(i/cols),st=mod.status??"Keep";
         const mesh=new THREE.Mesh(new THREE.BoxGeometry(mW,mH,mD),new THREE.MeshStandardMaterial({color:cMap[st]??0x7f8c8d,transparent:true,opacity:0.9,roughness:0.3,metalness:0.12}));
         mesh.position.set(-(cols-1)*(mW+gap)/2+col*(mW+gap),0,-(mD+gap)/2+row*(mD+gap));
         mesh.userData={idx:i}; meshes.push(mesh); group.add(mesh);
@@ -304,7 +287,7 @@ function AgentPanel({ manifest }) {
     if(agentActive){await conversation.endSession();setAgentActive(false);setTranscript(t=>[...t,{role:"agent",text:"Session ended."}])}
     else{if(agentId){await conversation.startSession({agentId,connectionType:"webrtc",overrides:manifest?{agent:{prompt:{prompt:"BATTERY PASSPORT:\n"+JSON.stringify(manifest,null,2)}}}:undefined});setTranscript(t=>[...t,{role:"system",text:"Connecting to ElevenLabs..."}])}else{setTranscript(t=>[...t,{role:"system",text:"Demo mode — no agent configured."}])}setAgentActive(true)}
   }
-  function toggleStep(i){setDone(p=>{const n=new Set(p);n.has(i)?n.delete(i):n.add(i);if(!agentId&&n.has(i)){const M=["Confirmed. Proceed.","Check for swelling.","Step logged.","SOH safe.","Noted."];setTranscript(t=>[...t,{role:"agent",text:M[mockIdx.current%M.length]}]);mockIdx.current++}return n})}
+  function toggleStep(i){setDone(p=>{const n=new Set(p);n.has(i)?n.delete(i):n.add(i);if(!agentId&&!n.has(i)===false){const M=["Confirmed. Proceed.","Check for swelling.","Step logged.","SOH safe.","Noted."];setTranscript(t=>[...t,{role:"agent",text:M[mockIdx.current%M.length]}]);mockIdx.current++}return n})}
   function sendChat(){if(!input.trim())return;setTranscript(t=>[...t,{role:"user",text:input.trim()}]);setInput("");if(!agentActive)setTranscript(t=>[...t,{role:"system",text:"Tap the mic first."}])}
   const allDone=done.size>=SAFETY_STEPS.length;
 
@@ -363,18 +346,22 @@ export default function WorkspacePage() {
   const { state } = useLocation();
   const navigate = useNavigate();
   const manifest = state?.manifest;
+  
+  console.log("STATE:", state);        // 👈 add this
+  console.log("MANIFEST:", manifest);  // 👈 and this
 
   const [sel, setSel] = useState(null);
-  const [leftW, setLeftW] = useState(null);
-  const [rightW, setRightW] = useState(null);
-  const [dragSide, setDragSide] = useState(null);
+  const [leftW, setLeftW] = useState(null);   // passport width (px)
+  const [rightW, setRightW] = useState(null);  // agent width (px)
+  const [dragSide, setDragSide] = useState(null); // "left" | "right" | null
   const containerRef = useRef(null);
 
+  // Initialize widths based on container — passport & diagram each ~half of (total - agentW)
   useEffect(() => {
     if (containerRef.current && leftW === null) {
       const total = containerRef.current.clientWidth;
       const agent = 310;
-      const remaining = total - agent - 8;
+      const remaining = total - agent - 8; // 8px for two drag handles
       setLeftW(Math.floor(remaining * 0.4));
       setRightW(agent);
     }
@@ -385,8 +372,11 @@ export default function WorkspacePage() {
     const mv = e => {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      if (dragSide === "left") setLeftW(Math.max(180, Math.min(500, e.clientX - rect.left)));
-      else if (dragSide === "right") setRightW(Math.max(250, Math.min(500, rect.right - e.clientX)));
+      if (dragSide === "left") {
+        setLeftW(Math.max(180, Math.min(500, e.clientX - rect.left)));
+      } else if (dragSide === "right") {
+        setRightW(Math.max(250, Math.min(500, rect.right - e.clientX)));
+      }
     };
     const up = () => setDragSide(null);
     window.addEventListener("mousemove", mv);
@@ -398,14 +388,8 @@ export default function WorkspacePage() {
     return (
       <div style={{ minHeight: "100vh", background: "var(--desktop)", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div className="window" style={{ maxWidth: 400, width: "100%" }}>
-          <div className="titlebar">
-            <div className="traffic-lights"><div className="tl close"/><div className="tl min"/><div className="tl max"/></div>
-            <div className="titlebar-title">Error — No Data</div>
-          </div>
-          <div style={{ padding: 24, textAlign: "center" }}>
-            <p style={{ marginBottom: 12, color: "var(--text-dim)" }}>No manifest loaded. Run an audit first.</p>
-            <button className="aqua-btn primary" onClick={() => navigate("/audit")}>Back to Audit</button>
-          </div>
+          <div className="titlebar"><div className="traffic-lights"><div className="tl close"/><div className="tl min"/><div className="tl max"/></div><div className="titlebar-title">Error — No Data</div></div>
+          <div style={{ padding: 24, textAlign: "center" }}><p style={{ marginBottom: 12, color: "var(--text-dim)" }}>No manifest loaded. Run an audit first.</p><button className="aqua-btn primary" onClick={() => navigate("/audit")}>Back to Audit</button></div>
         </div>
       </div>
     );
@@ -417,26 +401,33 @@ export default function WorkspacePage() {
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "var(--font-ui)" }}>
       <div className="titlebar" style={{ flexShrink: 0 }}>
-        <div className="traffic-lights">
-          <div className="tl close" onClick={() => navigate("/")} style={{ cursor: "pointer" }} />
-          <div className="tl min" /><div className="tl max" />
-        </div>
-        <div className="titlebar-title">ReVolt OS — Workspace — {safe(manifest.battery_id)}</div>
+        <div className="traffic-lights"><div className="tl close" onClick={() => navigate("/")} style={{ cursor: "pointer" }} /><div className="tl min" /><div className="tl max" /></div>
+        <div className="titlebar-title">ReVolt OS — Workspace — {manifest.battery_id}</div>
       </div>
       <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", background: "rgba(220,227,236,0.85)", borderBottom: "1px solid rgba(138,155,176,0.3)" }}>
         <button className="aqua-btn" onClick={() => navigate("/")}>← Overview</button>
         <button className="aqua-btn" onClick={() => navigate("/audit")}>New Audit</button>
         <div style={{ flex: 1 }} />
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)" }}>revolt://workspace/{safe(manifest.battery_id)}</div>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)" }}>revolt://workspace/{manifest.battery_id}</div>
       </div>
 
+      {/* Three panels with two drag handles */}
       <div ref={containerRef} style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* Left: passport */}
         <PassportSidebar manifest={manifest} width={leftW ?? 280} />
+
+        {/* Left drag handle */}
         <div onMouseDown={() => setDragSide("left")} style={{ width: 4, cursor: "col-resize", background: dragSide === "left" ? "var(--aqua-blue)" : "rgba(138,155,176,0.3)", flexShrink: 0 }} />
+
+        {/* Center: 3D + table (takes remaining space) */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <CenterPanel blueprint={blueprint} modules={modules} sel={sel} onSel={i => setSel(i === sel ? null : i)} />
         </div>
+
+        {/* Right drag handle */}
         <div onMouseDown={() => setDragSide("right")} style={{ width: 4, cursor: "col-resize", background: dragSide === "right" ? "var(--aqua-blue)" : "rgba(138,155,176,0.3)", flexShrink: 0 }} />
+
+        {/* Right: agent */}
         <div style={{ width: rightW ?? 310, flexShrink: 0 }}>
           <AgentPanel manifest={manifest} />
         </div>
