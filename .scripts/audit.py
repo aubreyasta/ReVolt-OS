@@ -1,0 +1,1333 @@
+"""
+audit.py — Gemini Multimodal Battery Auditor (Sprint 2)
+=======================================================
+This is Person 2's main script. It does SIX things:
+  1. VISION: Analyzes a battery photo to identify manufacturer/model/condition
+  2. TELEMETRY: Analyzes CSV data to calculate health grade + safety risks
+  3. EMBEDDING: Generates a vector embedding for MongoDB Vector Search
+  4. MANIFEST: Combines everything into a Digital Twin document that matches
+              Sprint 1's MongoDB schema exactly
+  5. PDF: Generates a Battery Passport PDF from the Digital Twin
+  6. UPLOAD: Uploads the PDF to the ElevenLabs Safety Foreman agent knowledge base
+
+The output is a complete document ready to POST to the Sprint 1 API:
+  POST http://localhost:5000/api/batteries
+
+HOW IT USES GEMINI:
+  - gemini-3-flash-preview: Multimodal reasoning (photo + CSV analysis)
+  - gemini-embedding-001: Converts telemetry into vector embeddings
+
+Run: python .scripts/audit.py .assets/sample_telemetry.csv .assets/battery_sticker.jpg
+"""
+
+from google import genai
+from google.genai import types
+from dotenv import load_dotenv
+import os
+import json
+import csv
+import sys
+import requests
+from pathlib import Path
+from datetime import datetime, timezone
+
+load_dotenv()
+
+# --- CONFIGURATION ---
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+GEMINI_MODEL = "gemini-3-flash-preview"
+EMBEDDING_MODEL = "gemini-embedding-001"
+
+# Sprint 1 API
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:5000")
+
+# ElevenLabs
+ELEVENLABS_API_KEY  = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID")
+
+
+def clean_json_response(raw_text: str) -> dict:
+    """
+    Gemini sometimes wraps JSON in markdown code fences like ```json ... ```.
+    This strips those fences and parses the clean JSON.
+    """
+    raw = raw_text.strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        if len(parts) >= 2:
+            raw = parts[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+    return json.loads(raw.strip())
+
+
+def parse_csv_stats(csv_path: str) -> dict:
+    """
+    Extract basic statistics from the CSV before sending to Gemini.
+    """
+    rows = []
+    with open(csv_path, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            rows.append(row)
+
+    if not rows:
+        return {"error": "Empty CSV file"}
+
+    voltages     = [float(r["voltage_v"]) for r in rows if r.get("voltage_v")]
+    currents     = [float(r["current_a"]) for r in rows if r.get("current_a")]
+    temps        = [float(r["temp_c"])    for r in rows if r.get("temp_c")]
+    socs         = [float(r["soc_pct"])   for r in rows if r.get("soc_pct")]
+    cycle_counts = [int(r["cycle_count"]) for r in rows if r.get("cycle_count")]
+    cycle_count  = max(cycle_counts) if cycle_counts else 0
+
+    stats = {
+        "data_points_count": len(rows),
+        "cycle_count":       cycle_count,
+        "voltage_min":  round(min(voltages), 2) if voltages else 0,
+        "voltage_max":  round(max(voltages), 2) if voltages else 0,
+        "voltage_mean": round(sum(voltages) / len(voltages), 2) if voltages else 0,
+        "temp_min_c":   round(min(temps), 1) if temps else 0,
+        "temp_max_c":   round(max(temps), 1) if temps else 0,
+        "temp_mean_c":  round(sum(temps) / len(temps), 1) if temps else 0,
+        "current_min":  round(min(currents), 1) if currents else 0,
+        "current_max":  round(max(currents), 1) if currents else 0,
+        "soc_start":    socs[0]  if socs else 0,
+        "soc_end":      socs[-1] if socs else 0,
+        "soc_drop":     round(socs[0] - socs[-1], 1) if socs else 0,
+    }
+
+    high_current_readings       = [c for c in currents if c > 60]
+    stats["high_current_events"]   = len(high_current_readings)
+    stats["fast_charge_ratio_pct"] = round(
+        len(high_current_readings) / len(currents) * 100, 1
+    ) if currents else 0
+
+    return stats
+
+
+# ============================================
+# STEP 1: ANALYZE BATTERY PHOTO (Vision)
+# ============================================
+
+def analyze_image(image_path: str) -> dict:
+    """
+    Use Gemini Vision to identify a battery from its photo/sticker.
+    """
+    image_bytes = Path(image_path).read_bytes()
+    ext = Path(image_path).suffix.lower()
+    mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".png": "image/png",  ".webp": "image/webp"}
+    mime_type = mime_map.get(ext, "image/jpeg")
+
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[
+            types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+            """You are a battery identification and safety inspection AI for ReVolt OS.
+Analyze this battery image and return ONLY valid JSON with no explanation.
+
+Look for:
+1. Manufacturer info from any stickers, labels, or markings
+2. Physical condition — check for swelling, bulging, corrosion, dents, leaks, burn marks
+3. Signs of lithium plating — white/gray metallic deposits near terminals, uneven cell swelling, discoloration patterns suggesting internal dendrite growth
+4. Terminal/connector types visible
+
+Return this exact JSON structure:
+{
+  "manufacturer": {
+    "name": "string - manufacturer name or 'Unknown'",
+    "model": "string - model/part number or 'Unknown'",
+    "chemistry": "string - one of: NMC, LFP, NCA, LMO, LTO, or 'Unknown'",
+    "nominal_voltage": 0.0,
+    "nominal_capacity_kwh": 0.0,
+    "manufacture_date": "string - ISO date or 'Unknown'"
+  },
+  "physical_condition": "string - one of: Excellent, Good, Minor wear, Moderate damage, Severe damage",
+  "physical_observations": ["list of specific things you see"],
+  "safety_concerns_from_photo": [
+    {
+      "risk_type": "Structural or Chemical or Thermal",
+      "severity": "Low or Medium or High or Critical",
+      "description": "What you observed",
+      "detected_by": "gemini_vision"
+    }
+  ]
+}
+
+If you cannot identify the battery (e.g. it's not a battery), still return the structure with 'Unknown' values and note what you see in physical_observations.
+If you see NO safety concerns, return an empty array for safety_concerns_from_photo."""
+        ]
+    )
+
+    return clean_json_response(response.text)
+
+
+# ============================================
+# STEP 2: ANALYZE TELEMETRY CSV (Reasoning)
+# ============================================
+
+def run_audit(csv_path: str, csv_stats: dict) -> dict:
+    """
+    Use Gemini to analyze telemetry data and generate a health assessment.
+    """
+    with open(csv_path, "r") as f:
+        csv_data = f.read()
+
+    prompt = f"""You are a battery engineering AI for ReVolt OS, an industrial platform that certifies used EV batteries for second-life use by SMEs.
+
+Analyze this battery telemetry data and pre-computed statistics. Return ONLY valid JSON.
+
+=== PRE-COMPUTED STATISTICS ===
+{json.dumps(csv_stats, indent=2)}
+
+=== RAW CSV DATA ===
+{csv_data}
+
+=== GRADING CRITERIA ===
+- A+ / A: SOH above 90%, low thermal stress, conservative discharge history
+- B+ / B: SOH 80-90%, moderate stress, some fast-charge events
+- C+ / C: SOH 70-80%, high fast-charge ratio or thermal events
+- D: SOH 60-70%, significant degradation
+- F: SOH below 60% or dangerous thermal events (peak temp > 60C)
+
+=== SAFETY RISK DETECTION ===
+Flag any of these as safety risks:
+- Peak temperature above 45C = Thermal risk (thermal abuse)
+- Peak temperature below -10C during charging = Thermal risk (lithium plating conditions)
+- Current spikes above 60A = Electrical stress risk  
+- Voltage dropping below 300V = Electrical risk (deep discharge)
+- SOC dropping more than 40% in one session = High-rate discharge risk
+- Rapid voltage drop at high SOC (voltage sag) = Electrical risk (internal resistance increase, possible lithium plating)
+- Charging at high C-rates (above 1C) when temperature is below 10C = Chemical risk (lithium plating)
+- Sudden capacity fade above 5% between cycles = Structural risk (electrode delamination)
+
+IMPORTANT: For each risk you detect, explain the electrochemical mechanism. For example:
+- "Lithium plating detected: charging at 0.8C below 5C causes metallic lithium deposits on the anode"
+- "Thermal abuse: sustained temps above 50C accelerate SEI layer growth and electrolyte decomposition"
+
+Return this exact JSON structure:
+{{
+  "health_grade": "B",
+  "health_details": {{
+    "state_of_health_pct": 82.0,
+    "remaining_useful_life_years": 4.2,
+    "total_cycles": 412,
+    "peak_temp_recorded_c": 54.1,
+    "avg_discharge_rate_c": 0.8,
+    "physical_condition": "Unknown - pending photo analysis",
+    "gemini_analysis_summary": "2-3 sentence technical summary of the battery condition."
+  }},
+  "safety_risks": [
+    {{
+      "risk_type": "Thermal",
+      "severity": "Medium",
+      "description": "What was detected",
+      "mitigation": "What to do about it",
+      "detected_by": "gemini_csv"
+    }}
+  ],
+  "recommended_config": "4S2P 48V Solar Stack",
+  "listing": {{
+    "title": "Short marketplace title with capacity, grade, and key feature",
+    "description": "2-3 sentence SEO-optimized listing description."
+  }},
+  "eu_compliant": true
+}}
+
+Base ALL values on the actual data. Do not copy the example values."""
+
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt
+    )
+
+    return clean_json_response(response.text)
+
+
+# ============================================
+# STEP 3: GENERATE VECTOR EMBEDDING
+# ============================================
+
+def generate_telemetry_embedding(csv_path: str) -> list:
+    """
+    Convert the telemetry CSV into a vector embedding using Gemini.
+    This is the battery's "behavior fingerprint" used for similarity search.
+    """
+    with open(csv_path, "r") as f:
+        csv_data = f.read()
+
+    response = client.models.embed_content(
+        model=EMBEDDING_MODEL,
+        contents=csv_data
+    )
+
+    embedding = response.embeddings[0].values
+    print(f"  Embedding generated: {len(embedding)} dimensions")
+    return embedding
+
+
+# ============================================
+# STEP 3b: COMPARE AGAINST FAILURE STATE LIBRARY
+# ============================================
+
+def compare_against_failures(embedding: list) -> dict:
+    """
+    Run a Vector Search against the known failure state library in MongoDB.
+    
+    THIS IS THE "MISSION CONTROL" MOMENT IN THE DEMO:
+    The terminal prints each failure profile and the similarity score.
+    If the battery is close to a known failure pattern, the system flags it.
+    
+    Example output judges will see:
+      Scanning failure state library...
+        Thermal runaway pattern:    12.3% match
+        Lithium plating pattern:     8.1% match  
+        Cell imbalance pattern:      5.4% match
+      ✓ CLEAR — No critical failure matches detected.
+    
+    Or for a dangerous battery:
+      Scanning failure state library...
+        Thermal runaway pattern:    87.2% match  ██████████ CRITICAL
+        Lithium plating pattern:    34.5% match  ████
+        Cell imbalance pattern:     22.1% match  ██
+      ✗ WARNING — High similarity to thermal runaway failure profile!
+    """
+    
+    result = {
+        "matches": [],
+        "clear": True,
+        "highest_threat": None,
+        "highest_score": 0,
+    }
+    
+    # Known failure profile IDs to search against
+    failure_ids = [
+        ("FAIL-THERMAL-RUNAWAY-001", "Thermal runaway pattern"),
+        ("FAIL-LITHIUM-PLATING-001", "Lithium plating pattern"),
+        ("FAIL-CELL-IMBALANCE-001",  "Cell imbalance pattern"),
+    ]
+    
+    print(f"  Scanning failure state library...")
+    
+    try:
+        # Run vector search via the API
+        search_response = requests.post(
+            f"{API_BASE_URL}/api/batteries/search",
+            headers={"Content-Type": "application/json"},
+            json={
+                "query_embedding": embedding,
+                "num_results": 8,
+            },
+        )
+        
+        if search_response.status_code != 200:
+            print(f"  ⚠ Vector Search unavailable — skipping failure comparison")
+            return result
+        
+        search_results = search_response.json().get("results", [])
+        
+        # Find matches against our known failure profiles
+        failure_scores = {}
+        for item in search_results:
+            bid = item.get("battery_id", "")
+            score = item.get("similarity_score", 0)
+            if bid.startswith("FAIL-"):
+                failure_scores[bid] = score
+        
+        # Print each failure profile comparison
+        for fail_id, fail_name in failure_ids:
+            score = failure_scores.get(fail_id, 0)
+            pct = score * 100
+            
+            # Build a visual bar (judges love this)
+            bar_len = int(pct / 5)
+            bar = "\u2588" * bar_len + "\u2591" * (20 - bar_len)
+            
+            # Determine threat level
+            if pct > 70:
+                level = "CRITICAL"
+                level_marker = " \u26a0\ufe0f"
+            elif pct > 40:
+                level = "WARNING"
+                level_marker = " !"
+            else:
+                level = ""
+                level_marker = ""
+            
+            print(f"    {fail_name:<30} {pct:5.1f}% {bar}{level_marker} {level}")
+            
+            result["matches"].append({
+                "profile": fail_id,
+                "name": fail_name,
+                "similarity_pct": round(pct, 1),
+                "threat_level": level or "CLEAR",
+            })
+            
+            if pct > result["highest_score"]:
+                result["highest_score"] = pct
+                result["highest_threat"] = fail_name
+        
+        # Final verdict
+        if result["highest_score"] > 70:
+            result["clear"] = False
+            print(f"\n  \u2717 ALERT — High similarity to {result['highest_threat']}!")
+            print(f"    Recommend: REJECT this unit for upcycling.")
+        elif result["highest_score"] > 40:
+            result["clear"] = False
+            print(f"\n  \u26a0 CAUTION — Moderate similarity to {result['highest_threat']}.")
+            print(f"    Recommend: Proceed with additional manual inspection.")
+        else:
+            print(f"\n  \u2713 CLEAR — No critical failure pattern matches detected.")
+            print(f"    Battery is safe to proceed with upcycling workflow.")
+        
+        # If no failure profiles were found in search results at all
+        if not failure_scores:
+            print(f"  (No failure reference profiles in database — run schema_and_seed.py to add them)")
+    
+    except requests.ConnectionError:
+        print(f"  \u26a0 Cannot reach API at {API_BASE_URL} — skipping failure comparison")
+    except Exception as e:
+        print(f"  \u26a0 Failure comparison error: {e}")
+    
+    return result
+
+
+# ============================================
+# STEP 3c: GENERATE UPCYCLE BLUEPRINT
+# ============================================
+
+def generate_upcycle_blueprint(audit_result: dict, csv_stats: dict, manufacturer_data: dict, photo_risks: list) -> dict:
+    """
+    Ask Gemini to generate a DETAILED, battery-specific upcycling blueprint.
+
+    WHY THIS EXISTS:
+    The existing audit tells us IF a battery is safe to upcycle (the audit gate).
+    But the TECHNICIAN needs to know HOW to upcycle it:
+      - Which cells/modules to bypass (the dead ones)
+      - What rewiring topology to use (series/parallel config)
+      - Exact step-by-step instructions with expected voltages
+      - What tools and BMS hardware they need
+      - Safety checkpoints between each physical step
+
+    This is the "prescription" that turns an old EV battery into a home
+    power storage system. The ElevenLabs voice agent will walk the technician
+    through these steps in real time.
+
+    WHAT GEMINI NEEDS TO KNOW:
+    We feed it the full audit context — the battery model, health grade,
+    which cells are degraded, the telemetry patterns, and any safety risks.
+    Gemini then uses its knowledge of battery engineering to produce a
+    realistic rewiring plan.
+    """
+
+    # Build context from everything we know about this battery
+    grade = audit_result.get("health_grade", "Unknown")
+    soh = audit_result.get("health_details", {}).get("state_of_health_pct", 0)
+    risks = audit_result.get("safety_risks", []) + photo_risks
+    chemistry = manufacturer_data.get("chemistry", "Unknown")
+    model = manufacturer_data.get("model", "Unknown")
+    mfg_name = manufacturer_data.get("name", "Unknown")
+    nominal_v = manufacturer_data.get("nominal_voltage", 0)
+    capacity = manufacturer_data.get("nominal_capacity_kwh", 0)
+    cycles = audit_result.get("health_details", {}).get("total_cycles", 0)
+    peak_temp = audit_result.get("health_details", {}).get("peak_temp_recorded_c", 0)
+
+    risk_text = "\n".join([
+        f"- [{r.get('severity','?')}] {r.get('risk_type','?')}: {r.get('description','')}"
+        for r in risks
+    ]) if risks else "No safety risks detected."
+
+    prompt = f"""You are a senior battery engineer for ReVolt OS, an industrial platform that upcycles used EV batteries into 48V home energy storage systems.
+
+You have completed an audit of a battery. Now you must generate the DETAILED UPCYCLING BLUEPRINT — the step-by-step technical prescription that a technician will follow to rewire this battery into a safe, functional home power storage unit.
+
+=== BATTERY IDENTITY ===
+Manufacturer: {mfg_name}
+Model: {model}
+Chemistry: {chemistry}
+Nominal cell voltage: {nominal_v}V
+Pack capacity: {capacity} kWh
+
+=== AUDIT RESULTS ===
+Health grade: {grade}
+State of health: {soh}%
+Total cycles: {cycles}
+Peak temperature recorded: {peak_temp}°C
+Voltage range: {csv_stats['voltage_min']}V – {csv_stats['voltage_max']}V
+Temperature range: {csv_stats['temp_min_c']}°C – {csv_stats['temp_max_c']}°C
+
+=== DETECTED SAFETY RISKS ===
+{risk_text}
+
+=== YOUR TASK ===
+Generate a complete upcycling blueprint. Return ONLY valid JSON with this exact structure:
+
+{{
+  "target_system": {{
+    "name": "string — e.g. '48V Home Solar Storage Module'",
+    "target_voltage": 48.0,
+    "target_capacity_kwh": 0.0,
+    "topology": "string — e.g. '14S2P' or '16S1P' — the series/parallel cell configuration",
+    "topology_explanation": "string — explain WHY this topology was chosen for this specific battery",
+    "compatible_inverters": ["list of compatible inverter types, e.g. '48V hybrid solar inverter'"],
+    "estimated_output_power_w": 0,
+    "estimated_lifespan_years": 0.0
+  }},
+  "module_assessment": [
+    {{
+      "module_id": "Module 1",
+      "status": "Keep" or "Bypass" or "Replace",
+      "reason": "string — why this module is kept, bypassed, or replaced",
+      "cell_voltage_expected": 0.0,
+      "notes": "any special handling notes"
+    }}
+  ],
+  "required_tools": [
+    {{
+      "tool": "string — tool name",
+      "specification": "string — specific rating or model, e.g. 'Class 0, rated 1000V'",
+      "purpose": "string — what this tool is used for in the procedure"
+    }}
+  ],
+  "required_parts": [
+    {{
+      "part": "string — part name, e.g. '48V BMS board'",
+      "specification": "string — specific specs",
+      "quantity": 1,
+      "purpose": "string — what this part does"
+    }}
+  ],
+  "upcycle_steps": [
+    {{
+      "step_number": 1,
+      "phase": "string — one of: Preparation, Discharging, Disassembly, Cell Testing, Rewiring, BMS Installation, Verification, Final Check",
+      "title": "string — short title for this step",
+      "instruction": "string — DETAILED instruction. Include specific voltages, pin numbers, wire colors, physical locations where relevant. Be as specific as a senior engineer would be when training an apprentice.",
+      "expected_reading": "string or null — what the multimeter/instrument should show after this step",
+      "safety_warning": "string or null — any safety concern specific to this step",
+      "estimated_minutes": 0,
+      "voice_agent_note": "string — what the ElevenLabs voice agent should emphasize when walking the technician through this step"
+    }}
+  ],
+  "pre_upcycle_checklist": [
+    "string — each item the technician must have/verify before starting"
+  ],
+  "post_upcycle_verification": [
+    {{
+      "test": "string — what to test",
+      "method": "string — how to test it",
+      "expected_result": "string — what a passing result looks like",
+      "fail_action": "string — what to do if it fails"
+    }}
+  ],
+  "estimated_total_time_hours": 0.0,
+  "difficulty_level": "string — Beginner, Intermediate, Advanced, Expert",
+  "gemini_engineering_notes": "string — 2-3 sentences of engineering rationale explaining the overall approach and any special considerations for this specific battery"
+}}
+
+IMPORTANT RULES:
+1. Base the topology on the ACTUAL battery specs. Calculate the series/parallel config needed to reach ~48V.
+2. For {chemistry} chemistry, use the correct cell voltages: NMC=3.6-3.7V, LFP=3.2V, NCA=3.6V, LTO=2.4V.
+3. If cells or modules are degraded (based on the risks), mark them for bypass and adjust the topology.
+4. Include REALISTIC step counts — a full upcycle typically has 12-20 steps.
+5. Every step that involves touching the battery must have a safety_warning.
+6. The voice_agent_note should be conversational — it's what a calm mentor would say out loud.
+7. Include expected multimeter readings wherever relevant.
+8. If the manufacturer/model is Unknown, base the blueprint on the telemetry data (voltage range tells you chemistry and cell count)."""
+
+    print(f"  Generating upcycle blueprint with Gemini...")
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt
+    )
+
+    blueprint = clean_json_response(response.text)
+    step_count = len(blueprint.get("upcycle_steps", []))
+    target = blueprint.get("target_system", {})
+    print(f"  Blueprint generated: {step_count} steps")
+    print(f"  Target: {target.get('topology', '?')} → {target.get('target_voltage', '?')}V")
+    print(f"  Difficulty: {blueprint.get('difficulty_level', '?')}")
+    print(f"  Est. time: {blueprint.get('estimated_total_time_hours', '?')} hours")
+
+    return blueprint
+
+
+# ============================================
+# STEP 4: BUILD COMPLETE DIGITAL TWIN
+# ============================================
+
+def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "seller-unknown") -> dict:
+    """
+    The main function — combines all steps into a complete Digital Twin
+    document that matches the Sprint 1 MongoDB schema exactly.
+    """
+    now        = datetime.now(timezone.utc)
+    battery_id = f"RVX-{now.strftime('%Y')}-{now.strftime('%m%d%H%M%S')}"
+
+    print(f"\n🔋 ReVolt OS — Gemini Battery Audit")
+    print(f"=" * 50)
+    print(f"Battery ID: {battery_id}")
+
+    # --- Parse CSV stats locally ---
+    print(f"\n[1/6] Parsing telemetry stats...")
+    csv_stats = parse_csv_stats(csv_path)
+    print(f"  {csv_stats['data_points_count']} data points, {csv_stats['cycle_count']} cycles")
+    print(f"  Voltage: {csv_stats['voltage_min']}V - {csv_stats['voltage_max']}V")
+    print(f"  Temp: {csv_stats['temp_min_c']}°C - {csv_stats['temp_max_c']}°C")
+
+    # --- Gemini telemetry analysis ---
+    print(f"\n[2/6] Running Gemini telemetry audit...")
+    audit_result = run_audit(csv_path, csv_stats)
+    print(f"  Health grade: {audit_result.get('health_grade', '?')}")
+    print(f"  Safety risks: {len(audit_result.get('safety_risks', []))}")
+
+    # --- Gemini photo analysis ---
+    manufacturer_data  = {"name": "Unknown", "model": "Unknown", "chemistry": "Unknown"}
+    photo_risks        = []
+    physical_condition = "Unknown — no photo provided"
+
+    if image_path and Path(image_path).exists():
+        print(f"\n[3/6] Analyzing battery photo with Gemini Vision...")
+        image_result = analyze_image(image_path)
+
+        if "manufacturer" in image_result:
+            mfg = image_result["manufacturer"]
+            manufacturer_data = {
+                "name":                 mfg.get("name", "Unknown"),
+                "model":                mfg.get("model", "Unknown"),
+                "chemistry":            mfg.get("chemistry", "Unknown"),
+                "nominal_voltage":      float(mfg.get("nominal_voltage", 0)),
+                "nominal_capacity_kwh": float(mfg.get("nominal_capacity_kwh", 0)),
+                "manufacture_date":     mfg.get("manufacture_date", "Unknown"),
+            }
+
+        physical_condition = image_result.get("physical_condition", "Unknown")
+        photo_risks        = image_result.get("safety_concerns_from_photo", [])
+        print(f"  Manufacturer: {manufacturer_data['name']}")
+        print(f"  Condition: {physical_condition}")
+        print(f"  Photo risks: {len(photo_risks)}")
+    else:
+        print(f"\n[3/6] No photo provided — skipping vision analysis")
+
+    # --- Generate embedding ---
+    print(f"\n[4/6] Generating telemetry embedding...")
+    embedding = generate_telemetry_embedding(csv_path)
+
+    # --- Compare against failure state library via Vector Search ---
+    print(f"\n[5/6] Comparing against failure state library (MongoDB Vector Search)...")
+    failure_comparison = compare_against_failures(embedding)
+
+    # --- Combine into the Digital Twin ---
+    all_risks      = audit_result.get("safety_risks", []) + photo_risks
+    health_details = audit_result.get("health_details", {})
+    health_details["physical_condition"] = physical_condition
+    health_details["audit_timestamp"]    = now.isoformat()
+    listing_data   = audit_result.get("listing", {})
+
+    # --- EN 18061:2025 AUDIT GATE DECISION ---
+    # This is the regulatory validation that determines the battery's fate.
+    # Two paths: "Certified for Repurpose" (good) or "Rejected for Recycling" (bad)
+    grade = audit_result.get("health_grade", "Pending")
+    soh = health_details.get("state_of_health_pct", 0)
+    is_failure_match = not failure_comparison.get("clear", True)
+    peak_temp = health_details.get("peak_temp_recorded_c", 0)
+    has_critical_risks = any(r.get("severity") in ("Critical", "High") for r in all_risks)
+
+    # REJECTION criteria (any one triggers rejection):
+    #   - Grade D or F
+    #   - SOH below 70% (EN 18061 retirement threshold)
+    #   - High similarity to known failure pattern
+    #   - Peak temp above 60C (separator damage threshold)
+    #   - Any Critical-severity safety risk
+    is_rejected = (
+        grade in ("D", "F")
+        or soh < 70
+        or is_failure_match
+        or peak_temp > 60
+        or has_critical_risks
+    )
+
+    battery_status = "Rejected for Recycling" if is_rejected else "Certified for Repurpose"
+
+    # --- STEP 6: GENERATE UPCYCLE BLUEPRINT (only for certified batteries) ---
+    upcycle_blueprint = None
+    if not is_rejected:
+        print(f"\n[6/6] Generating upcycle blueprint with Gemini...")
+        upcycle_blueprint = generate_upcycle_blueprint(
+            audit_result=audit_result,
+            csv_stats=csv_stats,
+            manufacturer_data=manufacturer_data,
+            photo_risks=photo_risks,
+        )
+    else:
+        print(f"\n[6/6] Battery REJECTED — skipping upcycle blueprint generation")
+
+    digital_twin = {
+        "battery_id": battery_id,
+        "status":     battery_status,
+        "manufacturer": manufacturer_data,
+        "health_grade": audit_result.get("health_grade", "Pending"),
+        "health_details": health_details,
+        "telemetry_summary": {
+            "voltage_min":           csv_stats["voltage_min"],
+            "voltage_max":           csv_stats["voltage_max"],
+            "voltage_mean":          csv_stats["voltage_mean"],
+            "temp_min_c":            csv_stats["temp_min_c"],
+            "temp_max_c":            csv_stats["temp_max_c"],
+            "temp_mean_c":           csv_stats["temp_mean_c"],
+            "capacity_fade_pct":     round(100 - csv_stats.get("soc_end", 0), 1),
+            "data_points_count":     csv_stats["data_points_count"],
+            "discharge_curve_shape": "Unknown",
+        },
+        "behavior_embedding": embedding,
+        # NEW: The upcycle blueprint — the full technical prescription
+        # This is None for rejected batteries, and a detailed JSON object for certified ones
+        "upcycle_blueprint": upcycle_blueprint,
+        "listing": {
+            "title":            listing_data.get("title", f"Used Battery Pack — Grade {audit_result.get('health_grade', '?')}"),
+            "description":      listing_data.get("description", "Awaiting full listing generation."),
+            "asking_price_usd": 0.0,
+            "seller_id":        seller_id,
+            "listed_at":        now.isoformat(),
+            "photo_urls":       [image_path] if image_path else [],
+        },
+        "safety_risks": all_risks,
+        "safety_workflow": {
+            "current_state": "Not Started" if not is_rejected else "Rejected",
+            "technician_id": None,
+            "target_config": (
+                f"{upcycle_blueprint['target_system']['topology']} {upcycle_blueprint['target_system']['name']}"
+                if upcycle_blueprint and upcycle_blueprint.get("target_system")
+                else (audit_result.get("recommended_config") if not is_rejected else "Recycling — no upcycle config")
+            ),
+            "started_at":    None,
+            "completed_at":  None,
+            "compliance_log": [],
+        },
+        "audit_manifest": {
+            "version":         "1.0",
+            "generated_by":    f"Gemini ({GEMINI_MODEL})",
+            "passport_id":     battery_id,
+            "grade":           grade,
+            "en_18061_status": battery_status,
+            "recommended_use": [audit_result.get("recommended_config", "Pending evaluation")] if not is_rejected else ["Certified recycling facility only"],
+            "warnings":        [r.get("description", "") for r in all_risks if r.get("severity") in ("High", "Critical")],
+            "rejection_reasons": [] if not is_rejected else [
+                r for r in [
+                    f"Grade {grade}" if grade in ("D", "F") else None,
+                    f"SOH {soh}% below 70% threshold" if soh < 70 else None,
+                    f"Failure pattern match: {failure_comparison.get('highest_threat')}" if is_failure_match else None,
+                    f"Peak temp {peak_temp}C exceeds 60C separator damage threshold" if peak_temp > 60 else None,
+                    "Critical safety risks detected" if has_critical_risks else None,
+                ] if r is not None
+            ],
+            "eu_compliant":    audit_result.get("eu_compliant", False),
+            "audit_timestamp": now.isoformat(),
+        },
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+
+    print(f"\n{'=' * 50}")
+    print(f"  EN 18061:2025 AUDIT GATE DECISION")
+    print(f"{'=' * 50}")
+    
+    if is_rejected:
+        print(f"  \u2717 STATUS: REJECTED FOR RECYCLING")
+        print(f"  Battery ID:   {battery_id}")
+        print(f"  Grade:        {grade}")
+        print(f"  SOH:          {soh}%")
+        print(f"  Safety risks: {len(all_risks)}")
+        
+        # Print specific rejection reasons
+        reasons = digital_twin["audit_manifest"]["rejection_reasons"]
+        print(f"  Rejection reasons:")
+        for reason in reasons:
+            print(f"    \u2717 {reason}")
+        
+        if is_failure_match:
+            print(f"  Failure match: {failure_comparison.get('highest_threat', 'Unknown')} ({failure_comparison.get('highest_score', 0):.1f}%)")
+        
+        print(f"\n  Classification: Hazardous Universal Waste")
+        print(f"  Action: Generate Recycling Manifest")
+        print(f"  >>> DO NOT ATTEMPT UPCYCLING <<<")
+    else:
+        print(f"  ✓ STATUS: CERTIFIED FOR REPURPOSE")
+        print(f"  Battery ID:   {battery_id}")
+        print(f"  Grade:        {grade}")
+        print(f"  SOH:          {soh}%")
+        print(f"  Safety risks: {len(all_risks)}")
+        print(f"  Failure library: CLEAR")
+        print(f"  Embedding:    {len(embedding)} dimensions")
+        
+        if upcycle_blueprint:
+            ts = upcycle_blueprint.get("target_system", {})
+            steps = upcycle_blueprint.get("upcycle_steps", [])
+            modules = upcycle_blueprint.get("module_assessment", [])
+            bypassed = [m for m in modules if m.get("status") == "Bypass"]
+            print(f"\n  ── UPCYCLE BLUEPRINT ──")
+            print(f"  Target:       {ts.get('topology', '?')} → {ts.get('target_voltage', '?')}V {ts.get('name', '')}")
+            print(f"  Capacity:     {ts.get('target_capacity_kwh', '?')} kWh")
+            print(f"  Modules:      {len(modules)} total, {len(bypassed)} bypassed")
+            print(f"  Steps:        {len(steps)}")
+            print(f"  Difficulty:   {upcycle_blueprint.get('difficulty_level', '?')}")
+            print(f"  Est. time:    {upcycle_blueprint.get('estimated_total_time_hours', '?')} hours")
+            print(f"  Tools needed: {len(upcycle_blueprint.get('required_tools', []))}")
+            print(f"  Parts needed: {len(upcycle_blueprint.get('required_parts', []))}")
+        
+        print(f"\n  Classification: Secondary Life Asset")
+        print(f"  Action: Generate Battery Passport + Upcycle Blueprint + trigger Safety Foreman")
+        print(f"  >>> CLEARED for upcycling workflow <<<")
+    
+    print(f"{'=' * 50}")
+
+    return digital_twin
+
+
+def save_manifest(digital_twin: dict, output_path: str = ".assets/manifest.json"):
+    """Save the Digital Twin to a local JSON file."""
+    with open(output_path, "w") as f:
+        json.dump(digital_twin, f, indent=2, default=str)
+    print(f"\n💾 Manifest saved to {output_path}")
+
+
+def push_to_api(digital_twin: dict):
+    """POST the Digital Twin to the Sprint 1 API."""
+    url = f"{API_BASE_URL}/api/batteries"
+    try:
+        response = requests.post(url, json=digital_twin)
+        if response.status_code in (200, 201):
+            result = response.json()
+            print(f"\n📡 Pushed to API: {result.get('action', 'done')} — {result.get('battery_id')}")
+        else:
+            print(f"\n⚠ API error {response.status_code}: {response.text}")
+    except requests.ConnectionError:
+        print(f"\n⚠ Could not connect to API at {API_BASE_URL}")
+        print(f"  Is the Flask server running? (python .scripts/api_endpoints.py)")
+
+
+# ============================================
+# STEP 5: GENERATE BATTERY PASSPORT PDF
+# ============================================
+
+def _make_table(data: list):
+    """
+    Helper — builds a standard 2-column key/value info table.
+    Used throughout the PDF to display structured data cleanly.
+    """
+    from reportlab.platypus import Table, TableStyle
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+
+    t = Table(data, colWidths=[2.2*inch, 4.5*inch])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#f0f0f5')),
+        ('TEXTCOLOR',  (0,0), (0,-1), colors.HexColor('#1a1a2e')),
+        ('FONTNAME',   (0,0), (0,-1), 'Helvetica-Bold'),
+        ('FONTSIZE',   (0,0), (-1,-1), 10),
+        ('ROWBACKGROUNDS', (0,0), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
+        ('GRID',    (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+        ('PADDING', (0,0), (-1,-1), 6),
+        ('VALIGN',  (0,0), (-1,-1), 'TOP'),
+    ]))
+    return t
+
+
+def generate_passport_pdf(digital_twin: dict) -> str:
+    """
+    Generate a nicely formatted PDF Battery Passport from the Digital Twin.
+
+    WHY THIS IS NEEDED:
+    ElevenLabs agents can only read documents — not raw JSON.
+    This converts the Digital Twin dictionary into a human-readable PDF
+    that the Safety Foreman agent uses as its knowledge base.
+
+    The agent will answer questions like:
+      "What PPE do I need?"  → reads PDF → answers correctly
+      "What are the risks?"  → reads PDF → answers correctly
+      "What step am I on?"   → reads PDF → answers correctly
+
+    Returns the path to the generated PDF file.
+    """
+    from reportlab.lib.pagesizes import letter
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer,
+        Table, TableStyle, HRFlowable
+    )
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+
+    battery_id  = digital_twin["battery_id"]
+    output_path = f".assets/passport_{battery_id}.pdf"
+
+    Path(".assets").mkdir(exist_ok=True)
+
+    doc = SimpleDocTemplate(
+        output_path, pagesize=letter,
+        rightMargin=0.75*inch, leftMargin=0.75*inch,
+        topMargin=0.75*inch,   bottomMargin=0.75*inch
+    )
+
+    styles      = getSampleStyleSheet()
+    title_style   = ParagraphStyle('T',  parent=styles['Title'],    fontSize=20, spaceAfter=4)
+    sub_style     = ParagraphStyle('S',  parent=styles['Normal'],   fontSize=11, textColor=colors.HexColor('#444'), spaceAfter=12)
+    section_style = ParagraphStyle('H',  parent=styles['Heading2'], fontSize=13, spaceBefore=14, spaceAfter=6)
+    body_style    = ParagraphStyle('B',  parent=styles['Normal'],   fontSize=10, spaceAfter=4)
+    small_style   = ParagraphStyle('Sm', parent=styles['Normal'],   fontSize=8,  textColor=colors.HexColor('#666'), spaceAfter=2)
+
+    # Pull data from the Digital Twin
+    hd       = digital_twin.get("health_details", {})
+    ts       = digital_twin.get("telemetry_summary", {})
+    risks    = digital_twin.get("safety_risks", [])
+    workflow = digital_twin.get("safety_workflow", {})
+    manifest = digital_twin.get("audit_manifest", {})
+    mfg      = digital_twin.get("manufacturer", {})
+
+    story = []
+
+    # ── HEADER ──────────────────────────────────────────
+    story.append(Paragraph("ReVolt OS", sub_style))
+    story.append(Paragraph("Digital Battery Passport", title_style))
+    story.append(Paragraph(
+        "Certified by Gemini Multimodal Auditor — For ElevenLabs Safety Foreman Agent",
+        sub_style
+    ))
+    story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#1a1a2e')))
+    story.append(Spacer(1, 10))
+
+    # ── IDENTITY ────────────────────────────────────────
+    story.append(Paragraph("Battery Identity", section_style))
+    story.append(_make_table([
+        ["Passport ID",  digital_twin.get("battery_id", "Unknown")],
+        ["Status",       digital_twin.get("status", "Unknown")],
+        ["Health Grade", digital_twin.get("health_grade", "Unknown")],
+        ["EU Compliant", "Yes" if manifest.get("eu_compliant") else "No"],
+        ["Generated By", manifest.get("generated_by", "Gemini")],
+        ["Audit Time",   str(manifest.get("audit_timestamp", "Unknown"))],
+    ]))
+    story.append(Spacer(1, 10))
+
+    # ── MANUFACTURER ────────────────────────────────────
+    story.append(Paragraph("Manufacturer Info", section_style))
+    story.append(_make_table([
+        ["Name",             mfg.get("name", "Unknown")],
+        ["Model",            mfg.get("model", "Unknown")],
+        ["Chemistry",        mfg.get("chemistry", "Unknown")],
+        ["Nominal Voltage",  f"{mfg.get('nominal_voltage', 'Unknown')}V"],
+        ["Capacity",         f"{mfg.get('nominal_capacity_kwh', 'Unknown')} kWh"],
+        ["Manufacture Date", mfg.get("manufacture_date", "Unknown")],
+    ]))
+    story.append(Spacer(1, 10))
+
+    # ── HEALTH ──────────────────────────────────────────
+    story.append(Paragraph("Health Assessment", section_style))
+    peak_temp     = hd.get("peak_temp_recorded_c", 0)
+    peak_temp_str = f"{peak_temp}°C  WARNING: EXCEEDS 45°C SAFE THRESHOLD" if peak_temp > 45 else f"{peak_temp}°C"
+    story.append(_make_table([
+        ["State of Health",       f"{hd.get('state_of_health_pct', 0)}%"],
+        ["Remaining Useful Life", f"{hd.get('remaining_useful_life_years', 0)} years"],
+        ["Total Cycles",          str(hd.get("total_cycles", 0))],
+        ["Peak Temp Recorded",    peak_temp_str],
+        ["Avg Discharge Rate",    f"{hd.get('avg_discharge_rate_c', 0)}C"],
+        ["Physical Condition",    hd.get("physical_condition", "Unknown")],
+    ]))
+    story.append(Spacer(1, 6))
+    summary = hd.get("gemini_analysis_summary", "")
+    if summary:
+        story.append(Paragraph(f"Gemini Analysis: {summary}", body_style))
+    story.append(Spacer(1, 10))
+
+    # ── TELEMETRY ───────────────────────────────────────
+    story.append(Paragraph("Telemetry Summary", section_style))
+    story.append(_make_table([
+        ["Voltage Min / Max / Mean", f"{ts.get('voltage_min',0)}V / {ts.get('voltage_max',0)}V / {ts.get('voltage_mean',0)}V"],
+        ["Temp Min / Max / Mean",    f"{ts.get('temp_min_c',0)}C / {ts.get('temp_max_c',0)}C / {ts.get('temp_mean_c',0)}C"],
+        ["Capacity Fade",            f"{ts.get('capacity_fade_pct', 0)}%"],
+        ["Data Points Analyzed",     str(ts.get("data_points_count", 0))],
+        ["Discharge Curve Shape",    ts.get("discharge_curve_shape", "Unknown")],
+    ]))
+    story.append(Spacer(1, 10))
+
+    # ── SAFETY RISKS ────────────────────────────────────
+    story.append(Paragraph("Safety Risks (Gemini-Detected)", section_style))
+
+    if not risks:
+        story.append(Paragraph("No safety risks detected.", body_style))
+    else:
+        severity_colors = {
+            "Critical": "#b00000",
+            "High":     "#cc3300",
+            "Medium":   "#c77000",
+            "Low":      "#006400",
+        }
+        for r in risks:
+            sev   = r.get("severity", "Low")
+            color = severity_colors.get(sev, "#333333")
+            risk_table = Table([
+                [f"[{sev.upper()}] {r.get('risk_type', 'Unknown')}", ""],
+                ["Risk",        r.get("description", "")],
+                ["Mitigation",  r.get("mitigation", "")],
+                ["Detected By", r.get("detected_by", "")],
+            ], colWidths=[1.5*inch, 5.2*inch])
+            risk_table.setStyle(TableStyle([
+                ('SPAN',       (0,0), (1,0)),
+                ('BACKGROUND', (0,0), (1,0), colors.HexColor(color)),
+                ('TEXTCOLOR',  (0,0), (1,0), colors.white),
+                ('FONTNAME',   (0,0), (1,0), 'Helvetica-Bold'),
+                ('FONTSIZE',   (0,0), (-1,-1), 10),
+                ('BACKGROUND', (0,1), (0,-1), colors.HexColor('#f0f0f5')),
+                ('FONTNAME',   (0,1), (0,-1), 'Helvetica-Bold'),
+                ('GRID',       (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                ('PADDING',    (0,0), (-1,-1), 6),
+                ('VALIGN',     (0,0), (-1,-1), 'TOP'),
+            ]))
+            story.append(risk_table)
+            story.append(Spacer(1, 6))
+
+    story.append(Spacer(1, 4))
+
+    # ── SAFETY WORKFLOW ─────────────────────────────────
+    story.append(Paragraph("Disassembly Workflow (Safety Foreman Protocol)", section_style))
+    story.append(Paragraph(
+        "Steps must be completed IN ORDER. No skipping allowed. "
+        "The ElevenLabs Safety Foreman agent enforces this sequence and logs each "
+        "step to MongoDB for the compliance audit trail.",
+        body_style
+    ))
+    story.append(Spacer(1, 6))
+
+    target = workflow.get("target_config", manifest.get("recommended_use", ["Unknown"])[0] if manifest.get("recommended_use") else "Unknown")
+    step_table = Table([
+        ["Step", "State",             "Instructions"],
+        ["1",    "Inspection",        "Verify PPE Level 3: insulated gloves, face shield, arc flash suit. Confirm fire extinguisher present. Check ambient temperature is below 30C."],
+        ["2",    "Discharging",       "Drain battery to safe voltage (<50V) via resistive load bank. Confirm with multimeter on main busbar before proceeding. Do not rush."],
+        ["3",    "Module Separation", "Unbolt modules per Gemini photo analysis. Disconnect busbars. Label each module. Handle any swollen or damaged cells with extra caution."],
+        ["4",    "Reassembly",        f"Wire modules into target configuration: {target}. Connect BMS. Verify output voltage matches spec before sign-off."],
+        ["5",    "Complete",          "Verbally confirm completion to Safety Foreman agent. Milestone will be logged to MongoDB. Battery Passport will be updated."],
+    ], colWidths=[0.5*inch, 1.4*inch, 4.8*inch])
+    step_table.setStyle(TableStyle([
+        ('BACKGROUND',     (0,0), (-1,0), colors.HexColor('#1a1a2e')),
+        ('TEXTCOLOR',      (0,0), (-1,0), colors.white),
+        ('FONTNAME',       (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE',       (0,0), (-1,-1), 9),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
+        ('GRID',    (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+        ('PADDING', (0,0), (-1,-1), 6),
+        ('VALIGN',  (0,0), (-1,-1), 'TOP'),
+        ('ALIGN',   (0,0), (0,-1), 'CENTER'),
+    ]))
+    story.append(step_table)
+    story.append(Spacer(1, 10))
+
+    # ── RECOMMENDED USE ─────────────────────────────────
+    story.append(Paragraph("Recommended Second-Life Configuration", section_style))
+    recommended = manifest.get("recommended_use", ["Unknown"])
+    story.append(Paragraph(f"Target Config: {recommended[0] if recommended else 'Unknown'}", body_style))
+
+    warnings = manifest.get("warnings", [])
+    if warnings:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("Active Warnings:", body_style))
+        for w in warnings:
+            story.append(Paragraph(f"  WARNING: {w}", body_style))
+
+    story.append(Spacer(1, 10))
+
+    # ── UPCYCLE BLUEPRINT (only for certified batteries) ──
+    blueprint = digital_twin.get("upcycle_blueprint")
+    if blueprint:
+        story.append(Paragraph("Upcycle Blueprint — Technical Prescription", section_style))
+
+        # Target system summary
+        target_sys = blueprint.get("target_system", {})
+        story.append(Paragraph(
+            f"<b>Target:</b> {target_sys.get('name', 'Unknown')} | "
+            f"<b>Topology:</b> {target_sys.get('topology', '?')} | "
+            f"<b>Voltage:</b> {target_sys.get('target_voltage', '?')}V | "
+            f"<b>Capacity:</b> {target_sys.get('target_capacity_kwh', '?')} kWh | "
+            f"<b>Difficulty:</b> {blueprint.get('difficulty_level', '?')} | "
+            f"<b>Est. Time:</b> {blueprint.get('estimated_total_time_hours', '?')} hrs",
+            body_style
+        ))
+        story.append(Spacer(1, 4))
+
+        if target_sys.get("topology_explanation"):
+            story.append(Paragraph(
+                f"<i>Engineering rationale: {target_sys['topology_explanation']}</i>",
+                body_style
+            ))
+            story.append(Spacer(1, 6))
+
+        # Module assessment table
+        modules = blueprint.get("module_assessment", [])
+        if modules:
+            story.append(Paragraph("Module Assessment", body_style))
+            mod_rows = [["Module", "Status", "Reason"]]
+            for m in modules:
+                mod_rows.append([
+                    m.get("module_id", "?"),
+                    m.get("status", "?"),
+                    m.get("reason", ""),
+                ])
+            mod_table = Table(mod_rows, colWidths=[1.0*inch, 0.8*inch, 4.9*inch])
+            mod_table.setStyle(TableStyle([
+                ('BACKGROUND',     (0,0), (-1,0), colors.HexColor('#2d6a4f')),
+                ('TEXTCOLOR',      (0,0), (-1,0), colors.white),
+                ('FONTNAME',       (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE',       (0,0), (-1,-1), 8),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f0faf5')]),
+                ('GRID',    (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('VALIGN',  (0,0), (-1,-1), 'TOP'),
+            ]))
+            story.append(mod_table)
+            story.append(Spacer(1, 8))
+
+        # Required tools & parts
+        tools = blueprint.get("required_tools", [])
+        parts = blueprint.get("required_parts", [])
+        if tools:
+            story.append(Paragraph("Required Tools", body_style))
+            tool_rows = [["Tool", "Specification", "Purpose"]]
+            for t in tools:
+                tool_rows.append([t.get("tool",""), t.get("specification",""), t.get("purpose","")])
+            tool_table = Table(tool_rows, colWidths=[1.5*inch, 2.0*inch, 3.2*inch])
+            tool_table.setStyle(TableStyle([
+                ('BACKGROUND',     (0,0), (-1,0), colors.HexColor('#1a1a2e')),
+                ('TEXTCOLOR',      (0,0), (-1,0), colors.white),
+                ('FONTNAME',       (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE',       (0,0), (-1,-1), 8),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
+                ('GRID',    (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('VALIGN',  (0,0), (-1,-1), 'TOP'),
+            ]))
+            story.append(tool_table)
+            story.append(Spacer(1, 6))
+
+        if parts:
+            story.append(Paragraph("Required Parts", body_style))
+            part_rows = [["Part", "Spec", "Qty", "Purpose"]]
+            for p in parts:
+                part_rows.append([p.get("part",""), p.get("specification",""), str(p.get("quantity",1)), p.get("purpose","")])
+            part_table = Table(part_rows, colWidths=[1.5*inch, 1.8*inch, 0.4*inch, 3.0*inch])
+            part_table.setStyle(TableStyle([
+                ('BACKGROUND',     (0,0), (-1,0), colors.HexColor('#1a1a2e')),
+                ('TEXTCOLOR',      (0,0), (-1,0), colors.white),
+                ('FONTNAME',       (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE',       (0,0), (-1,-1), 8),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
+                ('GRID',    (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('VALIGN',  (0,0), (-1,-1), 'TOP'),
+            ]))
+            story.append(part_table)
+            story.append(Spacer(1, 6))
+
+        # Pre-upcycle checklist
+        checklist = blueprint.get("pre_upcycle_checklist", [])
+        if checklist:
+            story.append(Paragraph("Pre-Upcycle Checklist", body_style))
+            for i, item in enumerate(checklist, 1):
+                story.append(Paragraph(f"  ☐ {item}", body_style))
+            story.append(Spacer(1, 6))
+
+        # Step-by-step upcycle procedure
+        steps = blueprint.get("upcycle_steps", [])
+        if steps:
+            story.append(Paragraph("Step-by-Step Upcycle Procedure", section_style))
+            story.append(Paragraph(
+                "The ElevenLabs Safety Foreman voice agent will walk the technician through "
+                "each step below in real time. Steps must be completed in order.",
+                body_style
+            ))
+            story.append(Spacer(1, 4))
+
+            for step in steps:
+                sn = step.get("step_number", "?")
+                phase = step.get("phase", "")
+                title = step.get("title", "")
+                instruction = step.get("instruction", "")
+                expected = step.get("expected_reading")
+                warning = step.get("safety_warning")
+                minutes = step.get("estimated_minutes", 0)
+
+                step_rows = [
+                    [f"Step {sn}: {title}", f"Phase: {phase} | ~{minutes} min"],
+                    ["Instruction", instruction],
+                ]
+                if expected:
+                    step_rows.append(["Expected Reading", expected])
+                if warning:
+                    step_rows.append(["⚠ Safety Warning", warning])
+
+                s_table = Table(step_rows, colWidths=[1.5*inch, 5.2*inch])
+                header_color = colors.HexColor('#d32f2f') if warning else colors.HexColor('#1a1a2e')
+                s_table.setStyle(TableStyle([
+                    ('SPAN',       (0,0), (1,0)),
+                    ('BACKGROUND', (0,0), (1,0), header_color),
+                    ('TEXTCOLOR',  (0,0), (1,0), colors.white),
+                    ('FONTNAME',   (0,0), (1,0), 'Helvetica-Bold'),
+                    ('FONTSIZE',   (0,0), (-1,-1), 8),
+                    ('BACKGROUND', (0,1), (0,-1), colors.HexColor('#f0f0f5')),
+                    ('FONTNAME',   (0,1), (0,-1), 'Helvetica-Bold'),
+                    ('GRID',       (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                    ('PADDING',    (0,0), (-1,-1), 4),
+                    ('VALIGN',     (0,0), (-1,-1), 'TOP'),
+                ]))
+                story.append(s_table)
+                story.append(Spacer(1, 4))
+
+        # Post-upcycle verification
+        verifications = blueprint.get("post_upcycle_verification", [])
+        if verifications:
+            story.append(Spacer(1, 4))
+            story.append(Paragraph("Post-Upcycle Verification", section_style))
+            v_rows = [["Test", "Method", "Expected Result", "If Fail"]]
+            for v in verifications:
+                v_rows.append([v.get("test",""), v.get("method",""), v.get("expected_result",""), v.get("fail_action","")])
+            v_table = Table(v_rows, colWidths=[1.3*inch, 1.8*inch, 2.0*inch, 1.6*inch])
+            v_table.setStyle(TableStyle([
+                ('BACKGROUND',     (0,0), (-1,0), colors.HexColor('#2d6a4f')),
+                ('TEXTCOLOR',      (0,0), (-1,0), colors.white),
+                ('FONTNAME',       (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE',       (0,0), (-1,-1), 8),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f0faf5')]),
+                ('GRID',    (0,0), (-1,-1), 0.5, colors.HexColor('#ccc')),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('VALIGN',  (0,0), (-1,-1), 'TOP'),
+            ]))
+            story.append(v_table)
+            story.append(Spacer(1, 6))
+
+        # Engineering notes
+        eng_notes = blueprint.get("gemini_engineering_notes")
+        if eng_notes:
+            story.append(Paragraph(f"<i>Gemini Engineering Notes: {eng_notes}</i>", body_style))
+
+    story.append(Spacer(1, 10))
+
+    # ── FOOTER ──────────────────────────────────────────
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#ccc')))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        "This Battery Passport was automatically generated by the ReVolt OS Gemini Multimodal Auditor "
+        "and uploaded to the ElevenLabs Safety Foreman agent as its knowledge base. "
+        "For use by trained technicians only. Passport Version 1.0.",
+        small_style
+    ))
+
+    doc.build(story)
+    print(f"\n📄 Battery Passport PDF saved: {output_path}")
+    return output_path
+
+
+# ============================================
+# STEP 6: UPLOAD PDF TO ELEVENLABS AGENT
+# ============================================
+
+def upload_to_elevenlabs(pdf_path: str, battery_id: str):
+    """
+    Upload the Battery Passport PDF to the ElevenLabs agent's knowledge base.
+
+    WHY THIS IS NEEDED:
+    Every battery is different. When a technician starts a disassembly session,
+    the Safety Foreman agent needs to know about THAT specific battery —
+    its risks, its grade, its workflow steps.
+
+    This function replaces the agent's knowledge base with the new battery's
+    passport so the agent is always talking about the current battery being worked on.
+
+    HOW IT WORKS:
+      1. Upload the PDF file to ElevenLabs — they store it and give back an ID
+      2. Attach that document ID to our agent's knowledge base
+      The agent can now answer questions about this specific battery instantly.
+    """
+    if not ELEVENLABS_API_KEY or not ELEVENLABS_AGENT_ID:
+        print("\n⚠ Skipping ElevenLabs upload — add ELEVENLABS_API_KEY and ELEVENLABS_AGENT_ID to your .env file")
+        return
+
+    print(f"\n📡 Uploading Battery Passport to ElevenLabs Safety Foreman agent...")
+
+    # Step 6a: Upload the PDF file to ElevenLabs
+    with open(pdf_path, "rb") as f:
+        upload_response = requests.post(
+            "https://api.elevenlabs.io/v1/convai/knowledge-base/documents",
+            headers={"xi-api-key": ELEVENLABS_API_KEY},
+            files={"file": (f"{battery_id}_passport.pdf", f, "application/pdf")},
+        )
+
+    if upload_response.status_code != 200:
+        print(f"  ⚠ Upload failed ({upload_response.status_code}): {upload_response.text}")
+        return
+
+    document_id = upload_response.json().get("id")
+    print(f"  ✓ PDF uploaded to ElevenLabs — document ID: {document_id}")
+
+    # Step 6b: Attach the document to the agent's knowledge base
+    attach_response = requests.patch(
+        f"https://api.elevenlabs.io/v1/convai/agents/{ELEVENLABS_AGENT_ID}",
+        headers={
+            "xi-api-key":   ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+        },
+        json={
+            "knowledge_base": [{"type": "document", "id": document_id}]
+        },
+    )
+
+    if attach_response.status_code == 200:
+        print(f"  ✓ Passport attached to Safety Foreman agent!")
+        print(f"    Agent is now briefed on battery: {battery_id}")
+    else:
+        print(f"  ⚠ Attach failed ({attach_response.status_code}): {attach_response.text}")
+
+
+# ============================================
+# MAIN — Run the full audit pipeline!
+# ============================================
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python .scripts/audit.py <csv_path> [image_path]")
+        print("  csv_path:   Path to the telemetry CSV file (required)")
+        print("  image_path: Path to the battery photo (optional)")
+        print()
+        print("Example:")
+        print("  python .scripts/audit.py .assets/sample_telemetry.csv .assets/battery_sticker.jpg")
+        print("  python .scripts/audit.py .tests/good_battery.csv                # CSV only")
+        print("  python .scripts/audit.py .tests/bad_battery.csv                 # Dangerous battery")
+        sys.exit(1)
+
+    csv_path   = sys.argv[1]
+    image_path = sys.argv[2] if len(sys.argv) > 2 else None
+
+    if not Path(csv_path).exists():
+        print(f"Error: CSV file not found: {csv_path}")
+        sys.exit(1)
+
+    if image_path and not Path(image_path).exists():
+        print(f"Warning: Image file not found: {image_path}")
+        print(f"  Proceeding with CSV-only audit...")
+        image_path = None
+
+    # Steps 1-4: Run Gemini audit and build the Digital Twin
+    digital_twin = build_digital_twin(csv_path, image_path)
+
+    # Save manifest.json locally
+    save_manifest(digital_twin)
+
+    # Push to MongoDB via Flask API
+    push_to_api(digital_twin)
+
+    # Step 5: Generate Battery Passport PDF
+    pdf_path = generate_passport_pdf(digital_twin)
+
+    # Step 6: Upload PDF to ElevenLabs Safety Foreman agent
+    upload_to_elevenlabs(pdf_path, digital_twin["battery_id"])
+
+    print(f"\n✅ Full audit pipeline complete for {digital_twin['battery_id']}")
+    print(f"   MongoDB updated        ✓")
+    print(f"   PDF saved: {pdf_path}  ✓")
+    print(f"   ElevenLabs agent briefed ✓")

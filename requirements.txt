@@ -1,0 +1,12 @@
+# ReVolt OS — Dependencies
+# Install: pip install -r requirements.txt
+
+pymongo[srv]==4.7.2
+python-dotenv==1.0.1
+numpy==1.26.4
+flask==3.0.3
+flask-cors==4.0.1
+certifi>=2024.2.2
+google-genai>=1.0.0
+requests>=2.31.0
+reportlab>=4.1.0
