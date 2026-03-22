@@ -268,6 +268,132 @@ def generate_telemetry_embedding(csv_path: str) -> list:
 
 
 # ============================================
+# STEP 3b: COMPARE AGAINST FAILURE STATE LIBRARY
+# ============================================
+
+def compare_against_failures(embedding: list) -> dict:
+    """
+    Run a Vector Search against the known failure state library in MongoDB.
+    
+    THIS IS THE "MISSION CONTROL" MOMENT IN THE DEMO:
+    The terminal prints each failure profile and the similarity score.
+    If the battery is close to a known failure pattern, the system flags it.
+    
+    Example output judges will see:
+      Scanning failure state library...
+        Thermal runaway pattern:    12.3% match
+        Lithium plating pattern:     8.1% match  
+        Cell imbalance pattern:      5.4% match
+      ✓ CLEAR — No critical failure matches detected.
+    
+    Or for a dangerous battery:
+      Scanning failure state library...
+        Thermal runaway pattern:    87.2% match  ██████████ CRITICAL
+        Lithium plating pattern:    34.5% match  ████
+        Cell imbalance pattern:     22.1% match  ██
+      ✗ WARNING — High similarity to thermal runaway failure profile!
+    """
+    
+    result = {
+        "matches": [],
+        "clear": True,
+        "highest_threat": None,
+        "highest_score": 0,
+    }
+    
+    # Known failure profile IDs to search against
+    failure_ids = [
+        ("FAIL-THERMAL-RUNAWAY-001", "Thermal runaway pattern"),
+        ("FAIL-LITHIUM-PLATING-001", "Lithium plating pattern"),
+        ("FAIL-CELL-IMBALANCE-001",  "Cell imbalance pattern"),
+    ]
+    
+    print(f"  Scanning failure state library...")
+    
+    try:
+        # Run vector search via the API
+        search_response = requests.post(
+            f"{API_BASE_URL}/api/batteries/search",
+            headers={"Content-Type": "application/json"},
+            json={
+                "query_embedding": embedding,
+                "num_results": 8,
+            },
+        )
+        
+        if search_response.status_code != 200:
+            print(f"  ⚠ Vector Search unavailable — skipping failure comparison")
+            return result
+        
+        search_results = search_response.json().get("results", [])
+        
+        # Find matches against our known failure profiles
+        failure_scores = {}
+        for item in search_results:
+            bid = item.get("battery_id", "")
+            score = item.get("similarity_score", 0)
+            if bid.startswith("FAIL-"):
+                failure_scores[bid] = score
+        
+        # Print each failure profile comparison
+        for fail_id, fail_name in failure_ids:
+            score = failure_scores.get(fail_id, 0)
+            pct = score * 100
+            
+            # Build a visual bar (judges love this)
+            bar_len = int(pct / 5)
+            bar = "\u2588" * bar_len + "\u2591" * (20 - bar_len)
+            
+            # Determine threat level
+            if pct > 70:
+                level = "CRITICAL"
+                level_marker = " \u26a0\ufe0f"
+            elif pct > 40:
+                level = "WARNING"
+                level_marker = " !"
+            else:
+                level = ""
+                level_marker = ""
+            
+            print(f"    {fail_name:<30} {pct:5.1f}% {bar}{level_marker} {level}")
+            
+            result["matches"].append({
+                "profile": fail_id,
+                "name": fail_name,
+                "similarity_pct": round(pct, 1),
+                "threat_level": level or "CLEAR",
+            })
+            
+            if pct > result["highest_score"]:
+                result["highest_score"] = pct
+                result["highest_threat"] = fail_name
+        
+        # Final verdict
+        if result["highest_score"] > 70:
+            result["clear"] = False
+            print(f"\n  \u2717 ALERT — High similarity to {result['highest_threat']}!")
+            print(f"    Recommend: REJECT this unit for upcycling.")
+        elif result["highest_score"] > 40:
+            result["clear"] = False
+            print(f"\n  \u26a0 CAUTION — Moderate similarity to {result['highest_threat']}.")
+            print(f"    Recommend: Proceed with additional manual inspection.")
+        else:
+            print(f"\n  \u2713 CLEAR — No critical failure pattern matches detected.")
+            print(f"    Battery is safe to proceed with upcycling workflow.")
+        
+        # If no failure profiles were found in search results at all
+        if not failure_scores:
+            print(f"  (No failure reference profiles in database — run schema_and_seed.py to add them)")
+    
+    except requests.ConnectionError:
+        print(f"  \u26a0 Cannot reach API at {API_BASE_URL} — skipping failure comparison")
+    except Exception as e:
+        print(f"  \u26a0 Failure comparison error: {e}")
+    
+    return result
+
+
+# ============================================
 # STEP 4: BUILD COMPLETE DIGITAL TWIN
 # ============================================
 
@@ -284,14 +410,14 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
     print(f"Battery ID: {battery_id}")
 
     # --- Parse CSV stats locally ---
-    print(f"\n[1/4] Parsing telemetry stats...")
+    print(f"\n[1/5] Parsing telemetry stats...")
     csv_stats = parse_csv_stats(csv_path)
     print(f"  {csv_stats['data_points_count']} data points, {csv_stats['cycle_count']} cycles")
     print(f"  Voltage: {csv_stats['voltage_min']}V - {csv_stats['voltage_max']}V")
     print(f"  Temp: {csv_stats['temp_min_c']}°C - {csv_stats['temp_max_c']}°C")
 
     # --- Gemini telemetry analysis ---
-    print(f"\n[2/4] Running Gemini telemetry audit...")
+    print(f"\n[2/5] Running Gemini telemetry audit...")
     audit_result = run_audit(csv_path, csv_stats)
     print(f"  Health grade: {audit_result.get('health_grade', '?')}")
     print(f"  Safety risks: {len(audit_result.get('safety_risks', []))}")
@@ -302,7 +428,7 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
     physical_condition = "Unknown — no photo provided"
 
     if image_path and Path(image_path).exists():
-        print(f"\n[3/4] Analyzing battery photo with Gemini Vision...")
+        print(f"\n[3/5] Analyzing battery photo with Gemini Vision...")
         image_result = analyze_image(image_path)
 
         if "manufacturer" in image_result:
@@ -322,11 +448,15 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
         print(f"  Condition: {physical_condition}")
         print(f"  Photo risks: {len(photo_risks)}")
     else:
-        print(f"\n[3/4] No photo provided — skipping vision analysis")
+        print(f"\n[3/5] No photo provided — skipping vision analysis")
 
     # --- Generate embedding ---
-    print(f"\n[4/4] Generating telemetry embedding...")
+    print(f"\n[4/5] Generating telemetry embedding...")
     embedding = generate_telemetry_embedding(csv_path)
+
+    # --- Compare against failure state library via Vector Search ---
+    print(f"\n[5/5] Comparing against failure state library (MongoDB Vector Search)...")
+    failure_comparison = compare_against_failures(embedding)
 
     # --- Combine into the Digital Twin ---
     all_risks      = audit_result.get("safety_risks", []) + photo_risks
@@ -335,9 +465,34 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
     health_details["audit_timestamp"]    = now.isoformat()
     listing_data   = audit_result.get("listing", {})
 
+    # --- EN 18061:2025 AUDIT GATE DECISION ---
+    # This is the regulatory validation that determines the battery's fate.
+    # Two paths: "Certified for Repurpose" (good) or "Rejected for Recycling" (bad)
+    grade = audit_result.get("health_grade", "Pending")
+    soh = health_details.get("state_of_health_pct", 0)
+    is_failure_match = not failure_comparison.get("clear", True)
+    peak_temp = health_details.get("peak_temp_recorded_c", 0)
+    has_critical_risks = any(r.get("severity") in ("Critical", "High") for r in all_risks)
+
+    # REJECTION criteria (any one triggers rejection):
+    #   - Grade D or F
+    #   - SOH below 70% (EN 18061 retirement threshold)
+    #   - High similarity to known failure pattern
+    #   - Peak temp above 60C (separator damage threshold)
+    #   - Any Critical-severity safety risk
+    is_rejected = (
+        grade in ("D", "F")
+        or soh < 70
+        or is_failure_match
+        or peak_temp > 60
+        or has_critical_risks
+    )
+
+    battery_status = "Rejected for Recycling" if is_rejected else "Certified for Repurpose"
+
     digital_twin = {
         "battery_id": battery_id,
-        "status":     "Under Review",
+        "status":     battery_status,
         "manufacturer": manufacturer_data,
         "health_grade": audit_result.get("health_grade", "Pending"),
         "health_details": health_details,
@@ -363,9 +518,9 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
         },
         "safety_risks": all_risks,
         "safety_workflow": {
-            "current_state": "Not Started",
+            "current_state": "Not Started" if not is_rejected else "Rejected",
             "technician_id": None,
-            "target_config": audit_result.get("recommended_config"),
+            "target_config": audit_result.get("recommended_config") if not is_rejected else "Recycling — no upcycle config",
             "started_at":    None,
             "completed_at":  None,
             "compliance_log": [],
@@ -374,9 +529,19 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
             "version":         "1.0",
             "generated_by":    f"Gemini ({GEMINI_MODEL})",
             "passport_id":     battery_id,
-            "grade":           audit_result.get("health_grade", "Pending"),
-            "recommended_use": [audit_result.get("recommended_config", "Pending evaluation")],
+            "grade":           grade,
+            "en_18061_status": battery_status,
+            "recommended_use": [audit_result.get("recommended_config", "Pending evaluation")] if not is_rejected else ["Certified recycling facility only"],
             "warnings":        [r.get("description", "") for r in all_risks if r.get("severity") in ("High", "Critical")],
+            "rejection_reasons": [] if not is_rejected else [
+                r for r in [
+                    f"Grade {grade}" if grade in ("D", "F") else None,
+                    f"SOH {soh}% below 70% threshold" if soh < 70 else None,
+                    f"Failure pattern match: {failure_comparison.get('highest_threat')}" if is_failure_match else None,
+                    f"Peak temp {peak_temp}C exceeds 60C separator damage threshold" if peak_temp > 60 else None,
+                    "Critical safety risks detected" if has_critical_risks else None,
+                ] if r is not None
+            ],
             "eu_compliant":    audit_result.get("eu_compliant", False),
             "audit_timestamp": now.isoformat(),
         },
@@ -385,11 +550,41 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
     }
 
     print(f"\n{'=' * 50}")
-    print(f"✓ Digital Twin built for {battery_id}")
-    print(f"  Grade: {digital_twin['health_grade']}")
-    print(f"  SOH: {health_details.get('state_of_health_pct', '?')}%")
-    print(f"  Safety risks: {len(all_risks)}")
-    print(f"  Embedding: {len(embedding)} dimensions")
+    print(f"  EN 18061:2025 AUDIT GATE DECISION")
+    print(f"{'=' * 50}")
+    
+    if is_rejected:
+        print(f"  \u2717 STATUS: REJECTED FOR RECYCLING")
+        print(f"  Battery ID:   {battery_id}")
+        print(f"  Grade:        {grade}")
+        print(f"  SOH:          {soh}%")
+        print(f"  Safety risks: {len(all_risks)}")
+        
+        # Print specific rejection reasons
+        reasons = digital_twin["audit_manifest"]["rejection_reasons"]
+        print(f"  Rejection reasons:")
+        for reason in reasons:
+            print(f"    \u2717 {reason}")
+        
+        if is_failure_match:
+            print(f"  Failure match: {failure_comparison.get('highest_threat', 'Unknown')} ({failure_comparison.get('highest_score', 0):.1f}%)")
+        
+        print(f"\n  Classification: Hazardous Universal Waste")
+        print(f"  Action: Generate Recycling Manifest")
+        print(f"  >>> DO NOT ATTEMPT UPCYCLING <<<")
+    else:
+        print(f"  \u2713 STATUS: CERTIFIED FOR REPURPOSE")
+        print(f"  Battery ID:   {battery_id}")
+        print(f"  Grade:        {grade}")
+        print(f"  SOH:          {soh}%")
+        print(f"  Safety risks: {len(all_risks)}")
+        print(f"  Failure library: CLEAR")
+        print(f"  Embedding:    {len(embedding)} dimensions")
+        print(f"\n  Classification: Secondary Life Asset")
+        print(f"  Action: Generate Battery Passport + trigger Safety Foreman")
+        print(f"  >>> CLEARED for 48V upcycling workflow <<<")
+    
+    print(f"{'=' * 50}")
 
     return digital_twin
 

@@ -407,7 +407,7 @@ def update_battery_status(battery_id):
     
     data = request.get_json()
     
-    valid_statuses = ["Listed", "Under Review", "Certified", "Sold", "Disassembly Started"]
+    valid_statuses = ["Pending Audit", "Under Review", "Certified for Repurpose", "Rejected for Recycling", "Disassembly Started", "Upcycle Complete"]
     new_status = data.get("status")
     
     if new_status not in valid_statuses:

@@ -42,8 +42,9 @@ DB_NAME = os.getenv("DB_NAME", "revolt_db")
 COLLECTION_NAME = "battery_twins"
 
 # How many numbers in each vector embedding
-# 256 is a good balance: detailed enough to capture behavior, small enough to be fast
-EMBEDDING_DIMENSIONS = 256
+# 3072 matches the gemini-embedding-001 model output
+# so Vector Search works with both fake seed data AND real Gemini embeddings
+EMBEDDING_DIMENSIONS = 3072
 
 
 def get_database():
@@ -104,7 +105,7 @@ def create_collection_with_validation(db):
                 },
                 "status": {
                     "bsonType": "string",
-                    "enum": ["Listed", "Under Review", "Certified", "Sold", "Disassembly Started"],
+                    "enum": ["Pending Audit", "Under Review", "Certified for Repurpose", "Rejected for Recycling", "Disassembly Started", "Upcycle Complete"],
                     "description": "Where in the marketplace lifecycle this battery is."
                 },
                 
@@ -334,29 +335,52 @@ def create_collection_with_validation(db):
     return collection
 
 
-def generate_fake_embedding(seed_value, dimensions=EMBEDDING_DIMENSIONS):
+def generate_fake_embedding(seed_value, dimensions=EMBEDDING_DIMENSIONS, cluster=None):
     """
     Generate a fake but DETERMINISTIC vector embedding for demo purposes.
     
-    In the real app, Person 2 will generate these from actual telemetry data
-    using Gemini or a sentence-transformer model. For now, we use numpy
-    to create fake embeddings that are:
-      - Deterministic (same seed = same vector, so demos are repeatable)
-      - Normalized (length = 1.0, which is required for cosine similarity)
+    CLUSTERING:
+    If a 'cluster' string is provided, embeddings in the same cluster
+    will be similar to each other (high cosine similarity). This makes
+    Vector Search actually work with fake data — healthy batteries match
+    other healthy batteries, and failure profiles match similar failures.
     
-    WHY NORMALIZED?
-    Vector Search uses "cosine similarity" to compare vectors.
-    Cosine similarity only cares about DIRECTION, not magnitude.
-    Normalizing ensures every vector has the same length.
+    Clusters:
+      "healthy_a"     — Grade A/A+ batteries (gentle use, low temps)
+      "healthy_b"     — Grade B/B+ batteries (moderate use)
+      "degraded"      — Grade C/C+ batteries (worn but usable)
+      "fail_thermal"  — Thermal runaway profiles
+      "fail_plating"  — Lithium plating profiles
+      "fail_imbalance" — Cell imbalance profiles
     """
     rng = np.random.RandomState(seed_value)
-    raw = rng.randn(dimensions)
     
-    # Normalize: divide each number by the total length of the vector
-    # This makes the vector's magnitude = 1.0
+    # Base vector from cluster center + noise
+    # Each cluster has a fixed "direction" that similar batteries share
+    cluster_seeds = {
+        "healthy_a": 1000,
+        "healthy_b": 2000,
+        "degraded": 3000,
+        "fail_thermal": 4000,
+        "fail_plating": 5000,
+        "fail_imbalance": 6000,
+    }
+    
+    if cluster and cluster in cluster_seeds:
+        # Generate the cluster center (deterministic per cluster)
+        center_rng = np.random.RandomState(cluster_seeds[cluster])
+        center = center_rng.randn(dimensions)
+        # Add small noise so each battery in the cluster is slightly different
+        noise = rng.randn(dimensions) * 0.3
+        raw = center + noise
+    else:
+        # No cluster — fully random
+        raw = rng.randn(dimensions)
+    
+    # Normalize to unit length (required for cosine similarity)
     normalized = raw / np.linalg.norm(raw)
     
-    return normalized.tolist()  # Convert numpy array to plain Python list for MongoDB
+    return normalized.tolist()
 
 
 def seed_sample_data(collection):
@@ -371,7 +395,7 @@ def seed_sample_data(collection):
     sample_batteries = [
         {
             "battery_id": "RVX-2024-00001",
-            "status": "Certified",
+            "status": "Certified for Repurpose",
             "manufacturer": {
                 "name": "CATL",
                 "model": "NMC811-72Ah",
@@ -409,7 +433,7 @@ def seed_sample_data(collection):
                 "data_points_count": 5200,
                 "discharge_curve_shape": "Linear",
             },
-            "behavior_embedding": generate_fake_embedding(seed_value=1),
+            "behavior_embedding": generate_fake_embedding(seed_value=1, cluster="healthy_a"),
             "listing": {
                 "title": "Premium 75kWh NMC Pack — Grade A — Low Cycles",
                 "description": "Verified CATL NMC811 pack from a gently-used Model 3. Only 580 cycles, 91% SOH. Perfect for home solar storage or light commercial EV conversion.",
@@ -449,7 +473,7 @@ def seed_sample_data(collection):
         },
         {
             "battery_id": "RVX-2024-00002",
-            "status": "Certified",
+            "status": "Certified for Repurpose",
             "manufacturer": {
                 "name": "BYD",
                 "model": "Blade-LFP-60Ah",
@@ -487,7 +511,7 @@ def seed_sample_data(collection):
                 "data_points_count": 8400,
                 "discharge_curve_shape": "Plateau",
             },
-            "behavior_embedding": generate_fake_embedding(seed_value=2),
+            "behavior_embedding": generate_fake_embedding(seed_value=2, cluster="healthy_b"),
             "listing": {
                 "title": "58kWh LFP Blade Pack — Grade B+ — Arizona Tested",
                 "description": "BYD Blade LFP pack proven in extreme heat. 1100 cycles, still 85% SOH. LFP chemistry means excellent safety for commercial installations.",
@@ -528,7 +552,7 @@ def seed_sample_data(collection):
         },
         {
             "battery_id": "RVX-2024-00003",
-            "status": "Listed",
+            "status": "Pending Audit",
             "manufacturer": {
                 "name": "LG Energy Solution",
                 "model": "Pouch-NCA-65Ah",
@@ -566,7 +590,7 @@ def seed_sample_data(collection):
                 "data_points_count": 12000,
                 "discharge_curve_shape": "Knee",
             },
-            "behavior_embedding": generate_fake_embedding(seed_value=3),
+            "behavior_embedding": generate_fake_embedding(seed_value=3, cluster="degraded"),
             "listing": {
                 "title": "65kWh NCA Pack — Grade C+ — Budget Option",
                 "description": "High-mileage pack at a bargain price. 72% SOH with 2.5 years of useful life remaining. Great for workshop power walls or cell-level projects.",
@@ -606,7 +630,7 @@ def seed_sample_data(collection):
         },
         {
             "battery_id": "RVX-2024-00004",
-            "status": "Certified",
+            "status": "Certified for Repurpose",
             "manufacturer": {
                 "name": "Samsung SDI",
                 "model": "Prismatic-NMC622-94Ah",
@@ -644,7 +668,7 @@ def seed_sample_data(collection):
                 "data_points_count": 2100,
                 "discharge_curve_shape": "Linear",
             },
-            "behavior_embedding": generate_fake_embedding(seed_value=4),
+            "behavior_embedding": generate_fake_embedding(seed_value=4, cluster="healthy_a"),
             "listing": {
                 "title": "PREMIUM 94kWh NMC Pack — Grade A+ — Near New",
                 "description": "Rare find: barely-used BMW iX pack with factory seals intact. Only 210 cycles, 97% SOH. The gold standard for second-life energy storage.",
@@ -713,7 +737,7 @@ def seed_sample_data(collection):
                 "data_points_count": 0,
                 "discharge_curve_shape": "Unknown",
             },
-            "behavior_embedding": generate_fake_embedding(seed_value=5),
+            "behavior_embedding": generate_fake_embedding(seed_value=5, cluster="healthy_b"),
             "listing": {
                 "title": "40kWh LFP Pack — Pending Audit",
                 "description": "Awaiting Gemini verification. Details will be updated after audit completion.",
@@ -744,7 +768,7 @@ def seed_sample_data(collection):
         
         {
             "battery_id": "FAIL-THERMAL-RUNAWAY-001",
-            "status": "Certified",
+            "status": "Rejected for Recycling",
             "manufacturer": {
                 "name": "Reference Profile",
                 "model": "Thermal Runaway Signature",
@@ -777,7 +801,7 @@ def seed_sample_data(collection):
                 "capacity_fade_pct": 58.0, "data_points_count": 500,
                 "discharge_curve_shape": "Knee",
             },
-            "behavior_embedding": generate_fake_embedding(seed_value=100),
+            "behavior_embedding": generate_fake_embedding(seed_value=100, cluster="fail_thermal"),
             "listing": {
                 "title": "FAILURE REFERENCE — Thermal Runaway Pattern",
                 "description": "Reference profile for thermal runaway precursors. Not for sale.",
@@ -793,7 +817,7 @@ def seed_sample_data(collection):
         },
         {
             "battery_id": "FAIL-LITHIUM-PLATING-001",
-            "status": "Certified",
+            "status": "Rejected for Recycling",
             "manufacturer": {
                 "name": "Reference Profile",
                 "model": "Lithium Plating Signature",
@@ -826,7 +850,7 @@ def seed_sample_data(collection):
                 "capacity_fade_pct": 39.0, "data_points_count": 600,
                 "discharge_curve_shape": "Knee",
             },
-            "behavior_embedding": generate_fake_embedding(seed_value=101),
+            "behavior_embedding": generate_fake_embedding(seed_value=101, cluster="fail_plating"),
             "listing": {
                 "title": "FAILURE REFERENCE — Lithium Plating Pattern",
                 "description": "Reference profile for lithium plating from cold-climate fast charging. Not for sale.",
@@ -843,7 +867,7 @@ def seed_sample_data(collection):
         },
         {
             "battery_id": "FAIL-CELL-IMBALANCE-001",
-            "status": "Certified",
+            "status": "Rejected for Recycling",
             "manufacturer": {
                 "name": "Reference Profile",
                 "model": "Severe Cell Imbalance Signature",
@@ -876,7 +900,7 @@ def seed_sample_data(collection):
                 "capacity_fade_pct": 35.0, "data_points_count": 900,
                 "discharge_curve_shape": "Knee",
             },
-            "behavior_embedding": generate_fake_embedding(seed_value=102),
+            "behavior_embedding": generate_fake_embedding(seed_value=102, cluster="fail_imbalance"),
             "listing": {
                 "title": "FAILURE REFERENCE — Severe Cell Imbalance",
                 "description": "Reference profile for dangerous cell imbalance patterns. Not for sale.",
@@ -910,29 +934,197 @@ def seed_sample_data(collection):
     return sample_batteries
 
 
+def generate_reference_library(collection):
+    """
+    Generate 42 additional reference batteries to build a proper
+    "fingerprint library" for Vector Search.
+    
+    WHY 50 TOTAL?
+    With only 8 batteries, Vector Search returns low-confidence scores
+    because there aren't enough reference points. With 50 batteries
+    spread across healthy/degraded/failure clusters, the similarity
+    scores become meaningful — a healthy battery genuinely scores high
+    against other healthy ones and low against failure profiles.
+    
+    The library is split across behavior clusters:
+      - 15 healthy Grade A/A+ (gentle use, residential, temperate climates)
+      - 10 healthy Grade B/B+ (moderate use, some fast charging)
+      - 7 degraded Grade C/C+ (high mileage, some stress)
+      - 4 failure: thermal abuse (hot climate, DC fast charge abuse)
+      - 3 failure: lithium plating (cold climate fast charging)
+      - 3 failure: cell imbalance (old packs, BMS failures)
+    """
+    
+    now = datetime.now(timezone.utc)
+    
+    # Template profiles for each cluster
+    profiles = [
+        # 15 x Healthy A
+        *[{"prefix": "REF-HA", "grade": random.choice(["A+", "A"]), "cluster": "healthy_a",
+           "chemistry": random.choice(["NMC", "LFP", "NCA"]),
+           "soh": round(random.uniform(88, 97), 1), "cycles": random.randint(100, 500),
+           "peak_temp": round(random.uniform(28, 38), 1), "avg_current": round(random.uniform(0.2, 0.5), 1),
+           "climate": random.choice(["Temperate — Pacific NW", "Temperate — Bay Area", "Temperate — UK", "Mild — Southern California"]),
+          } for _ in range(15)],
+        
+        # 10 x Healthy B
+        *[{"prefix": "REF-HB", "grade": random.choice(["B+", "B"]), "cluster": "healthy_b",
+           "chemistry": random.choice(["NMC", "LFP"]),
+           "soh": round(random.uniform(78, 88), 1), "cycles": random.randint(500, 1200),
+           "peak_temp": round(random.uniform(35, 48), 1), "avg_current": round(random.uniform(0.5, 1.0), 1),
+           "climate": random.choice(["Subtropical — Florida", "Mediterranean — Spain", "Continental — Chicago"]),
+          } for _ in range(10)],
+        
+        # 7 x Degraded C
+        *[{"prefix": "REF-DC", "grade": random.choice(["C+", "C"]), "cluster": "degraded",
+           "chemistry": random.choice(["NMC", "NCA"]),
+           "soh": round(random.uniform(70, 78), 1), "cycles": random.randint(1200, 2000),
+           "peak_temp": round(random.uniform(42, 55), 1), "avg_current": round(random.uniform(0.8, 1.5), 1),
+           "climate": random.choice(["Arid — Phoenix", "Hot — Dubai", "Continental — Detroit"]),
+          } for _ in range(7)],
+        
+        # 4 x Failure: thermal
+        *[{"prefix": "REF-FT", "grade": "F", "cluster": "fail_thermal",
+           "chemistry": "NMC",
+           "soh": round(random.uniform(35, 55), 1), "cycles": random.randint(1800, 3000),
+           "peak_temp": round(random.uniform(62, 80), 1), "avg_current": round(random.uniform(1.5, 2.5), 1),
+           "climate": "Extreme heat — thermal abuse reference",
+          } for _ in range(4)],
+        
+        # 3 x Failure: lithium plating
+        *[{"prefix": "REF-FP", "grade": "D", "cluster": "fail_plating",
+           "chemistry": "NMC",
+           "soh": round(random.uniform(55, 65), 1), "cycles": random.randint(700, 1200),
+           "peak_temp": round(random.uniform(30, 40), 1), "avg_current": round(random.uniform(0.3, 0.6), 1),
+           "climate": "Cold climate — lithium plating reference",
+          } for _ in range(3)],
+        
+        # 3 x Failure: cell imbalance
+        *[{"prefix": "REF-FI", "grade": "D", "cluster": "fail_imbalance",
+           "chemistry": random.choice(["LFP", "NMC"]),
+           "soh": round(random.uniform(58, 68), 1), "cycles": random.randint(1400, 2200),
+           "peak_temp": round(random.uniform(38, 48), 1), "avg_current": round(random.uniform(0.5, 0.9), 1),
+           "climate": "Mixed — cell imbalance reference",
+          } for _ in range(3)],
+    ]
+    
+    ref_batteries = []
+    for i, p in enumerate(profiles):
+        bid = f"{p['prefix']}-{i+1:03d}"
+        is_fail = p["grade"] in ("D", "F")
+        
+        ref_batteries.append({
+            "battery_id": bid,
+            "status": "Rejected for Recycling" if is_fail else "Certified for Repurpose",
+            "manufacturer": {
+                "name": "Reference Library",
+                "model": f"{p['cluster']} profile #{i+1}",
+                "chemistry": p["chemistry"],
+                "nominal_voltage": 3.7 if p["chemistry"] in ("NMC", "NCA") else 3.2,
+                "nominal_capacity_kwh": round(random.uniform(40, 95), 0),
+                "manufacture_date": f"{random.randint(2019, 2023)}-{random.randint(1,12):02d}-01",
+            },
+            "health_grade": p["grade"],
+            "health_details": {
+                "state_of_health_pct": p["soh"],
+                "remaining_useful_life_years": round(max(0, (p["soh"] - 60) / 5), 1),
+                "total_cycles": p["cycles"],
+                "peak_temp_recorded_c": p["peak_temp"],
+                "avg_discharge_rate_c": p["avg_current"],
+                "physical_condition": "Reference profile",
+                "gemini_analysis_summary": f"Reference library entry: {p['cluster']} cluster.",
+                "audit_timestamp": now,
+            },
+            "provenance": {
+                "original_vehicle": "Reference library",
+                "vehicle_vin_hash": f"REF_{i:03d}",
+                "climate_zone": p["climate"],
+                "years_in_service": round(random.uniform(1, 6), 1),
+                "removal_reason": "Reference library entry",
+            },
+            "telemetry_summary": {
+                "voltage_min": round(random.uniform(2.5, 3.3) * 96, 1),
+                "voltage_max": round(random.uniform(3.8, 4.2) * 96, 1),
+                "voltage_mean": round(random.uniform(3.4, 3.8) * 96, 1),
+                "temp_min_c": round(random.uniform(-10, 15), 1),
+                "temp_max_c": p["peak_temp"],
+                "temp_mean_c": round(p["peak_temp"] * 0.6, 1),
+                "capacity_fade_pct": round(100 - p["soh"], 1),
+                "data_points_count": random.randint(500, 10000),
+                "discharge_curve_shape": "Knee" if is_fail else random.choice(["Linear", "Plateau"]),
+            },
+            "behavior_embedding": generate_fake_embedding(seed_value=200 + i, cluster=p["cluster"]),
+            "listing": {
+                "title": f"Reference: {p['cluster']} #{i+1}",
+                "description": "Fingerprint library entry. Not for sale.",
+                "asking_price_usd": 0.0,
+                "seller_id": "system-library",
+                "listed_at": now,
+                "photo_urls": [],
+            },
+            "created_at": now,
+            "updated_at": now,
+            "audit_manifest": {"version": "1.0", "generated_by": "System", "passport_id": bid, "grade": p["grade"],
+                               "en_18061_status": "Rejected for Recycling" if is_fail else "Certified for Repurpose",
+                               "recommended_use": ["Recycling"] if is_fail else ["Stationary storage"],
+                               "warnings": [], "rejection_reasons": []},
+            "safety_workflow": {"current_state": "Not Started", "technician_id": None, "target_config": None,
+                                "started_at": None, "completed_at": None, "compliance_log": []},
+            "safety_risks": [],
+        })
+    
+    # Clear existing reference library entries
+    deleted = collection.delete_many({"battery_id": {"$regex": "^REF-"}})
+    if deleted.deleted_count > 0:
+        print(f"  Cleared {deleted.deleted_count} old reference library entries")
+    
+    result = collection.insert_many(ref_batteries)
+    print(f"✓ Generated {len(result.inserted_ids)} reference library batteries:")
+    
+    # Count by cluster
+    from collections import Counter
+    cluster_counts = Counter(p["cluster"] for p in profiles)
+    for cluster, count in sorted(cluster_counts.items()):
+        print(f"    {cluster:<20} {count} profiles")
+    
+    return ref_batteries
+
+
 # ============================================
 # MAIN — Run this script!
 # ============================================
 if __name__ == "__main__":
-    print("\n🔋 ReVolt Exchange — Sprint 1: Schema & Seed Data")
+    import random
+    random.seed(42)  # Reproducible reference library
+    
+    print("\n🔋 ReVolt OS — Schema, Seed Data & Reference Library")
     print("=" * 55)
     
     # Step 1: Connect
-    print("\n[1/3] Connecting to MongoDB Atlas...")
+    print("\n[1/4] Connecting to MongoDB Atlas...")
     db = get_database()
     
     # Step 2: Create collection with validation
-    print("\n[2/3] Creating collection with schema validation...")
+    print("\n[2/4] Creating collection with schema validation...")
     collection = create_collection_with_validation(db)
     
-    # Step 3: Seed sample data
-    print("\n[3/3] Seeding sample battery data...")
+    # Step 3: Seed core sample data (8 batteries)
+    print("\n[3/4] Seeding core sample battery data...")
     batteries = seed_sample_data(collection)
     
+    # Step 4: Generate reference fingerprint library (42 more)
+    print("\n[4/4] Generating reference fingerprint library...")
+    ref_batteries = generate_reference_library(collection)
+    
     # Done!
+    total = collection.count_documents({})
     print("\n" + "=" * 55)
-    print("✓ Sprint 1 Step 1 COMPLETE!")
+    print("✓ Database fully populated!")
     print(f"  Database: {DB_NAME}")
     print(f"  Collection: {COLLECTION_NAME}")
-    print(f"  Documents: {collection.count_documents({})}")
-    print("\nNext: Run 02_vector_search_setup.py to enable similarity search")
+    print(f"  Total documents: {total}")
+    print(f"    Core batteries:    {len(batteries)}")
+    print(f"    Reference library: {len(ref_batteries)}")
+    print(f"  Embedding dimensions: {EMBEDDING_DIMENSIONS}")
+    print("\nVector Search will now have {total} reference points for comparison.")
+    print("Next: Run vector_search_setup.py to verify the index")
