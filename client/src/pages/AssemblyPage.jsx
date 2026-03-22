@@ -1,54 +1,16 @@
 // =============================================================================
 // pages/AssemblyPage.jsx -- Page 3 of 3
 //
-// PURPOSE:
-//   Hands-free safety guide for battery disassembly.
-//   Left panel:  6-step safety checklist (tapped manually or auto-checked by agent)
-//   Right panel: ElevenLabs voice agent -- mic, transcript, risk alert
-//
-// ASSEMBLY COMPLETION FLOW:
-//   When all steps are done, "Complete Assembly" button appears.
-//   Clicking it POSTs the completed milestone record to FastAPI.
-//   The backend is responsible for verification / signing (not the frontend).
-//   On success, the frontend navigates back to PassportPage with an enriched
-//   manifest: { ...original, status: "disassembly_completed", assembly_record }
-//   PassportCard renders assembly_record as a green "Verified" badge.
-//   If the POST fails (backend not yet wired), it falls back to navigating
-//   with a locally-constructed record marked as unverified.
-//
-// ELEVENLABS SETUP -- see comment block before ELEVENLABS_AGENT_ID.
+// Mic button: canvas-based radial frequency bar visualizer (like ref image 2).
+// Draws imperatively via requestAnimationFrame -- zero React state in render loop.
+// Two channels: mic (getUserMedia) + agent (MediaElementAudioSourceNode).
+// FFT frequency bins map to radial bars around the button circumference.
 // =============================================================================
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-// -----------------------------------------------------------------------------
-// ELEVENLABS AGENT SETUP -- what to do before wiring the live SDK
-//
-// 1. Create agent at elevenlabs.io --> Conversational AI --> New Agent
-//    Name: "ReVolt Safety Foreman"
-//    Voice: calm authoritative voice (e.g. "Clyde" or "Arnold")
-//    System prompt:
-//      "You are an industrial safety foreman guiding a technician through
-//       high-voltage EV battery disassembly. Be calm, authoritative, precise.
-//       The battery passport will be injected as context before the session.
-//       Confirm each safety step verbally, then call log_milestone with
-//       step_index (0-based) and step_label."
-//
-// 2. Add a Tool in the agent dashboard:
-//    Tool name:  log_milestone
-//    Type:       Webhook (POST)
-//    URL:        http://localhost:8000/api/batteries/{passport_id}/log-milestone
-//    Parameters: { "step_index": number, "step_label": string }
-//    When the agent calls this, onToolCall below fires and updates the checklist.
-//
-// 3. npm install @elevenlabs/react
-//
-// 4. Paste the Agent ID in the constant below.
-//
-// 5. Uncomment the useConversation block inside the component (search UNCOMMENT).
-// -----------------------------------------------------------------------------
-const ELEVENLABS_AGENT_ID = null; // e.g. "agent_01jqabcdefghij"
+const ELEVENLABS_AGENT_ID = null;
 
 const SAFETY_STEPS = [
   "Confirm PPE: insulated gloves, face shield, arc-flash suit",
@@ -59,8 +21,6 @@ const SAFETY_STEPS = [
   "Seal and label cells for storage or transport",
 ];
 
-// Canned responses for demo mode only.
-// In live mode these are replaced entirely by the ElevenLabs audio stream.
 const MOCK_RESPONSES = [
   "Confirmed. Thermal stress flag is active -- proceed with extra caution.",
   (m) => "Noted. Recommended config is: " + (m?.recommended_config ?? "see passport") + ".",
@@ -69,6 +29,237 @@ const MOCK_RESPONSES = [
   "Step logged. Proceed when ready.",
 ];
 
+// =============================================================================
+// useAudioAnalyser -- two-channel Web Audio setup
+// =============================================================================
+function useAudioAnalyser() {
+  const ctxRef    = useRef(null);
+  const micAn     = useRef(null);
+  const agentAn   = useRef(null);
+  const micStream = useRef(null);
+
+  const init = useCallback(async () => {
+    if (ctxRef.current) return;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctxRef.current = ctx;
+
+    // Mic analyser -- FFT for frequency bars
+    const mAn = ctx.createAnalyser();
+    mAn.fftSize = 256;
+    mAn.smoothingTimeConstant = 0.82;
+    micAn.current = mAn;
+
+    // Agent analyser
+    const aAn = ctx.createAnalyser();
+    aAn.fftSize = 256;
+    aAn.smoothingTimeConstant = 0.82;
+    agentAn.current = aAn;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      micStream.current = stream;
+      ctx.createMediaStreamSource(stream).connect(mAn);
+      // no mic -> destination (prevent feedback)
+    } catch (err) {
+      console.warn("[ReVolt] Mic:", err.message);
+    }
+  }, []);
+
+  const connectAgentElement = useCallback((el) => {
+    if (!ctxRef.current || !agentAn.current || !el) return;
+    try {
+      const src = ctxRef.current.createMediaElementSource(el);
+      src.connect(agentAn.current);
+      src.connect(ctxRef.current.destination);
+    } catch { /* already connected */ }
+  }, []);
+
+  // Returns merged frequency data (0..255 uint8, length = fftSize/2 = 128)
+  const getFrequency = useCallback(() => {
+    const size = 128;
+    const mic   = new Uint8Array(size);
+    const agent = new Uint8Array(size);
+    micAn.current?.getByteFrequencyData(mic);
+    agentAn.current?.getByteFrequencyData(agent);
+    const merged = new Uint8Array(size);
+    for (let i = 0; i < size; i++) merged[i] = Math.max(mic[i], agent[i]);
+    return merged;
+  }, []);
+
+  const destroy = useCallback(() => {
+    micStream.current?.getTracks().forEach(t => t.stop());
+    ctxRef.current?.close();
+    ctxRef.current = micAn.current = agentAn.current = micStream.current = null;
+  }, []);
+
+  return { init, destroy, getFrequency, connectAgentElement };
+}
+
+// =============================================================================
+// MicButton -- canvas drawn imperatively, radial frequency bars like ref image
+// =============================================================================
+const BTN_SIZE = 160;
+
+function MicButton({ active, onClick, getFrequency }) {
+  const canvasRef = useRef(null);
+  const rafRef    = useRef(null);
+  const smoothRef = useRef(new Float32Array(64).fill(0));
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const W = BTN_SIZE;
+    const H = BTN_SIZE;
+    const cx = W / 2;
+    const cy = H / 2;
+    const NUM_BARS  = 64;
+    const INNER_R   = W * 0.28;   // inner radius where bars start
+    const MAX_BAR_H = W * 0.20;   // max bar length outward
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+
+      if (active) {
+        const raw = getFrequency();        // Uint8Array[128], use first 64
+        const sm  = smoothRef.current;
+        for (let i = 0; i < NUM_BARS; i++) {
+          sm[i] = sm[i] * 0.75 + (raw[i] / 255) * 0.25;
+        }
+
+        for (let i = 0; i < NUM_BARS; i++) {
+          const angle   = (i / NUM_BARS) * Math.PI * 2 - Math.PI / 2;
+          const barH    = sm[i] * MAX_BAR_H;
+          const x1 = cx + INNER_R * Math.cos(angle);
+          const y1 = cy + INNER_R * Math.sin(angle);
+          const x2 = cx + (INNER_R + barH) * Math.cos(angle);
+          const y2 = cy + (INNER_R + barH) * Math.sin(angle);
+
+          // Color gradient: green (bottom) -> blue (sides) -> purple (top)
+          // Map angle 0..2PI to hue
+          const hue = ((i / NUM_BARS) * 200 + 140) % 360; // 140=green, 200=blue, 280=purple
+          const alpha = 0.5 + sm[i] * 0.5;
+          ctx.strokeStyle = `hsla(${hue}, 100%, 60%, ${alpha})`;
+          ctx.lineWidth   = (W / NUM_BARS) * 0.55;
+          ctx.lineCap     = "round";
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+        }
+
+        // Inner glow ring
+        const grd = ctx.createRadialGradient(cx, cy, INNER_R * 0.7, cx, cy, INNER_R);
+        grd.addColorStop(0, "rgba(0,255,136,0.0)");
+        grd.addColorStop(1, "rgba(0,255,136,0.12)");
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(cx, cy, INNER_R, 0, Math.PI * 2);
+        ctx.fill();
+
+      } else {
+        // Idle: subtle dotted ring
+        smoothRef.current = new Float32Array(64).fill(0);
+        ctx.strokeStyle = "rgba(100,160,220,0.25)";
+        ctx.lineWidth   = 1;
+        ctx.setLineDash([3, 5]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, INNER_R + 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      rafRef.current = requestAnimationFrame(draw);
+    }
+
+    rafRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [active, getFrequency]);
+
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        position: "relative",
+        width: BTN_SIZE, height: BTN_SIZE,
+        borderRadius: "50%",
+        border: `2px solid ${active ? "rgba(0,200,120,0.45)" : "rgba(96,144,192,0.55)"}`,
+        background: active
+          ? "radial-gradient(circle at 40% 35%, #0d2318, #040d08)"
+          : "radial-gradient(circle at 40% 35%, #ddeeff, #b8d0ec)",
+        boxShadow: active
+          ? "0 0 24px rgba(0,255,136,0.18), inset 0 0 16px rgba(0,0,0,0.65), 2px 2px 0 rgba(0,0,0,0.4)"
+          : "2px 2px 0 rgba(0,0,0,0.4), -1px -1px 0 rgba(255,255,255,0.85), inset 0 1px 0 rgba(255,255,255,0.55)",
+        cursor: "pointer",
+        overflow: "hidden",
+        padding: 0,
+        transition: "background 0.4s, box-shadow 0.4s, border-color 0.4s",
+        flexShrink: 0,
+      }}
+    >
+      {/* Canvas drawn imperatively -- no React state in the loop */}
+      <canvas
+        ref={canvasRef}
+        width={BTN_SIZE}
+        height={BTN_SIZE}
+        style={{ position: "absolute", inset: 0, borderRadius: "50%" }}
+      />
+
+      {/* Idle label -- fades out when active */}
+      <div style={{
+        position: "absolute", inset: 0,
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", gap: 5,
+        opacity: active ? 0 : 1,
+        transition: "opacity 0.3s",
+        pointerEvents: "none",
+        zIndex: 2,
+      }}>
+        <span style={{ fontSize: 26, lineHeight: 1 }}>🎙</span>
+        <span style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--text-dim)", letterSpacing: "0.1em" }}>
+          TAP TO SPEAK
+        </span>
+      </div>
+
+      {/* Live badge */}
+      {active && (
+        <div style={{
+          position: "absolute", bottom: 14, left: 0, right: 0,
+          textAlign: "center", fontSize: 8, fontFamily: "var(--font-mono)",
+          color: "#00ff88", letterSpacing: "0.12em",
+          textShadow: "0 0 8px #00ff88",
+          pointerEvents: "none", zIndex: 2,
+        }}>
+          ● LIVE
+        </div>
+      )}
+    </button>
+  );
+}
+
+// =============================================================================
+// LiveClock
+// =============================================================================
+function LiveClock() {
+  const [t, setT] = useState(() =>
+    new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  );
+  useEffect(() => {
+    const id = setInterval(() =>
+      setT(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
+    , 10000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div style={{ color: "#ddeeff", fontSize: 11, fontFamily: "var(--font-mono)", background: "rgba(0,0,0,0.3)", padding: "2px 8px", borderRadius: 2 }}>
+      {t}
+    </div>
+  );
+}
+
+// =============================================================================
+// AssemblyPage
+// =============================================================================
 export default function AssemblyPage() {
   const { state } = useLocation();
   const navigate  = useNavigate();
@@ -78,61 +269,31 @@ export default function AssemblyPage() {
   const [done,        setDone]        = useState(new Set());
   const [completing,  setCompleting]  = useState(false);
   const [transcript,  setTranscript]  = useState([
-    { role: "agent", text: "Safety foreman online. Battery passport loaded. Ready to begin." },
+    { role: "agent", text: "Lorem ipsum dolor sit amet. Safety foreman online. Battery passport loaded." },
   ]);
-  const mockResponseIdx = useRef(0);
+  const mockIdx = useRef(0);
+  const { init, destroy, getFrequency } = useAudioAnalyser();
 
-  // ---------------------------------------------------------------------------
-  // UNCOMMENT THIS BLOCK when ELEVENLABS_AGENT_ID is set.
-  // Also add at the top:  import { useConversation } from "@elevenlabs/react";
-  //
-  // const conversation = useConversation({
-  //   agentId: ELEVENLABS_AGENT_ID,
-  //   overrides: manifest ? {
-  //     agent: {
-  //       prompt: {
-  //         prompt: "BATTERY PASSPORT FOR THIS SESSION:\n" + JSON.stringify(manifest, null, 2)
-  //       }
-  //     }
-  //   } : undefined,
-  //   onMessage: ({ message }) => {
-  //     setTranscript(t => [...t, { role: "agent", text: message }]);
-  //   },
-  //   onToolCall: ({ toolName, parameters }) => {
-  //     if (toolName === "log_milestone") {
-  //       const idx = parameters.step_index;
-  //       setDone(prev => new Set([...prev, idx]));
-  //       setTranscript(t => [...t, {
-  //         role: "agent",
-  //         text: "Step " + (idx + 1) + " logged: " + parameters.step_label,
-  //       }]);
-  //     }
-  //   },
-  //   onError: (err) => console.error("ElevenLabs error:", err),
-  // });
-  //
-  // Replace toggleAgent() body with:
-  //   if (agentActive) {
-  //     conversation.endSession();
-  //     setAgentActive(false);
-  //   } else {
-  //     await conversation.startSession({ agentId: ELEVENLABS_AGENT_ID });
-  //     setAgentActive(true);
-  //   }
-  // ---------------------------------------------------------------------------
+  // Stable ref so MicButton's useEffect doesn't re-fire
+  const freqRef = useRef(getFrequency);
+  useEffect(() => { freqRef.current = getFrequency; }, [getFrequency]);
+  const stableFreq = useCallback(() => freqRef.current(), []);
 
-  function toggleAgent() {
-    setAgentActive(v => {
-      if (!v) {
-        setTranscript(t => [...t, {
-          role: "agent",
-          text: ELEVENLABS_AGENT_ID
-            ? "Connecting to ElevenLabs agent..."
-            : "Demo mode. Tap checklist steps to simulate agent responses.",
-        }]);
-      }
-      return !v;
-    });
+  async function toggleAgent() {
+    if (agentActive) {
+      destroy();
+      setAgentActive(false);
+      setTranscript(t => [...t, { role: "agent", text: "Session ended." }]);
+    } else {
+      await init();
+      setAgentActive(true);
+      setTranscript(t => [...t, {
+        role: "agent",
+        text: ELEVENLABS_AGENT_ID
+          ? "Connecting to ElevenLabs..."
+          : "Demo mode active. Mic is live -- speak to see visualizer.",
+      }]);
+    }
   }
 
   function toggleStep(i) {
@@ -141,8 +302,8 @@ export default function AssemblyPage() {
       if (next.has(i)) { next.delete(i); return next; }
       next.add(i);
       if (!ELEVENLABS_AGENT_ID) {
-        const resp = MOCK_RESPONSES[mockResponseIdx.current % MOCK_RESPONSES.length];
-        mockResponseIdx.current++;
+        const resp = MOCK_RESPONSES[mockIdx.current % MOCK_RESPONSES.length];
+        mockIdx.current++;
         setTranscript(t => [...t, {
           role: "agent",
           text: typeof resp === "function" ? resp(manifest) : resp,
@@ -152,79 +313,33 @@ export default function AssemblyPage() {
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // completeAssembly
-  //
-  // Builds a plain assembly_record object (no hashing -- that is the backend's job)
-  // and POSTs it to FastAPI. The backend is responsible for verification / signing.
-  //
-  // BACKEND DEPENDENCY -- POST /api/batteries/:id/complete-assembly
-  //   This endpoint does not exist yet in server/main.py. Add it:
-  //
-  //     @app.post("/api/batteries/{passport_id}/complete-assembly")
-  //     def complete_assembly(passport_id: str, body: dict):
-  //         # body contains: { steps_completed, steps_total, step_labels, completed_at }
-  //         # 1. Save record to MongoDB
-  //         # 2. Sign the record (HMAC or JCS seal) for tamper-evidence
-  //         # 3. Update battery status to "disassembly_completed" in MongoDB
-  //         # 4. Return the saved record with a "verified": true field
-  //         #
-  //         # Until MongoDB is wired, return a stub:
-  //         return { **body, "verified": True, "signed_by": "revolt-os-server" }
-  //
-  // FALLBACK:
-  //   If the POST fails (backend not yet live), we navigate anyway with
-  //   verified: false so the badge renders in its unverified state.
-  //   This keeps the demo working end-to-end without the backend.
-  // ---------------------------------------------------------------------------
   async function completeAssembly() {
     if (!manifest || done.size < SAFETY_STEPS.length) return;
     setCompleting(true);
-
-    const completedIndices = Array.from(done).sort((a, b) => a - b);
-
+    const sorted = Array.from(done).sort((a, b) => a - b);
     const record = {
-      passport_id:     manifest.passport_id,
-      completed_at:    new Date().toISOString(),
+      passport_id: manifest.passport_id,
+      completed_at: new Date().toISOString(),
       steps_completed: done.size,
-      steps_total:     SAFETY_STEPS.length,
-      step_labels:     completedIndices.map(i => SAFETY_STEPS[i]),
-      verified:        false,  // Backend sets this to true after signing
+      steps_total: SAFETY_STEPS.length,
+      step_labels: sorted.map(i => SAFETY_STEPS[i]),
+      verified: false,
     };
-
     try {
-      const res = await fetch(
-        "/api/batteries/" + manifest.passport_id + "/complete-assembly",
-        {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify(record),
-        }
-      );
-      if (res.ok) {
-        const serverRecord = await res.json();
-        // Backend may return { ...record, verified: true, signed_by: "..." }
-        Object.assign(record, serverRecord);
-      }
-    } catch {
-      // Backend not yet live -- fall through with verified: false
-    }
-
+      const res = await fetch("/api/batteries/" + manifest.passport_id + "/complete-assembly", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(record),
+      });
+      if (res.ok) Object.assign(record, await res.json());
+    } catch { /* backend offline */ }
     navigate("/passport/" + manifest.passport_id, {
-      state: {
-        manifest: {
-          ...manifest,
-          status:          "disassembly_completed",
-          assembly_record: record,
-        },
-      },
+      state: { manifest: { ...manifest, status: "disassembly_completed", assembly_record: record } },
     });
   }
 
-  const progress = done.size;
-  const total    = SAFETY_STEPS.length;
-  const pct      = Math.round((progress / total) * 100);
-  const allDone  = progress === total;
+  useEffect(() => () => destroy(), [destroy]);
+
+  const pct     = Math.round((done.size / SAFETY_STEPS.length) * 100);
+  const allDone = done.size === SAFETY_STEPS.length;
 
   return (
     <div style={S.desktop}>
@@ -234,8 +349,7 @@ export default function AssemblyPage() {
           <div className="titlebar">
             <div className="traffic-lights">
               <div className="tl close" onClick={() => navigate(-1)} style={{ cursor: "pointer" }} />
-              <div className="tl min" />
-              <div className="tl max" />
+              <div className="tl min" /><div className="tl max" />
             </div>
             <div className="titlebar-title">
               Assembly Agent -- {manifest?.passport_id ?? "No Passport Loaded"}
@@ -246,10 +360,8 @@ export default function AssemblyPage() {
             <button className="aqua-btn" onClick={() => navigate(-1)}>Passport</button>
             <div style={{ flex: 1 }} />
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div
-                className={`led ${agentActive ? "green" : "amber"}`}
-                style={agentActive ? { animation: "blink 0.8s infinite" } : {}}
-              />
+              <div className={`led ${agentActive ? "green" : "amber"}`}
+                style={agentActive ? { animation: "blink 0.8s infinite" } : {}} />
               <span style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: "bold" }}>
                 {agentActive ? "AGENT ACTIVE" : "AGENT STANDBY"}
               </span>
@@ -260,7 +372,7 @@ export default function AssemblyPage() {
 
           <div style={S.body}>
 
-            {/* Left: Checklist */}
+            {/* ---- Left: Checklist ---- */}
             <div style={S.leftCol}>
               <div style={S.colHeader}>DISASSEMBLY PROTOCOL</div>
 
@@ -274,7 +386,7 @@ export default function AssemblyPage() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginBottom: 3, color: "var(--text-dim)" }}>
                   <span>PROGRESS</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{pct}% ({progress}/{total})</span>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>{pct}% ({done.size}/{SAFETY_STEPS.length})</span>
                 </div>
                 <div className="progress-track">
                   <div className="progress-fill" style={{ width: `${pct}%` }} />
@@ -285,28 +397,19 @@ export default function AssemblyPage() {
                 {SAFETY_STEPS.map((label, i) => {
                   const isDone = done.has(i);
                   return (
-                    <div
-                      key={i}
-                      className="inset-panel"
-                      style={{
-                        display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 10px",
-                        background: isDone ? "rgba(0,200,68,0.12)" : "rgba(255,255,255,0.35)",
-                        borderColor: isDone ? "rgba(0,180,50,0.4)" : "rgba(100,140,200,0.5)",
-                        cursor: "pointer", transition: "background 0.15s",
-                      }}
-                      onClick={() => toggleStep(i)}
-                    >
+                    <div key={i} className="inset-panel" onClick={() => toggleStep(i)} style={{
+                      display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 10px",
+                      cursor: "pointer", transition: "background 0.15s",
+                      background: isDone ? "rgba(0,200,68,0.12)" : "rgba(255,255,255,0.35)",
+                      borderColor: isDone ? "rgba(0,180,50,0.4)" : "rgba(100,140,200,0.5)",
+                    }}>
                       <div className={`led ${isDone ? "green" : "gray"}`} style={{ flexShrink: 0, marginTop: 2 }} />
                       <div>
                         <div style={{ fontSize: 9, fontWeight: "bold", color: "var(--text-dim)", letterSpacing: "0.08em", marginBottom: 2 }}>
                           STEP {String(i + 1).padStart(2, "0")}
                           {isDone && <span style={{ color: "var(--green)", marginLeft: 6 }}>LOGGED</span>}
                         </div>
-                        <div style={{
-                          fontSize: 11,
-                          color: isDone ? "var(--text-dim)" : "var(--text)",
-                          textDecoration: isDone ? "line-through" : "none",
-                        }}>
+                        <div style={{ fontSize: 11, color: isDone ? "var(--text-dim)" : "var(--text)", textDecoration: isDone ? "line-through" : "none" }}>
                           {label}
                         </div>
                       </div>
@@ -315,64 +418,57 @@ export default function AssemblyPage() {
                 })}
               </div>
 
-              {/* Complete button -- appears only when all steps are done */}
               {allDone && (
-                <button
-                  className="aqua-btn primary"
+                <button className="aqua-btn primary"
                   style={{ width: "100%", padding: "10px 0", fontSize: 12, opacity: completing ? 0.6 : 1 }}
-                  onClick={completeAssembly}
-                  disabled={completing}
+                  onClick={completeAssembly} disabled={completing}
                 >
                   {completing ? "Saving record..." : "Complete Assembly -- Return to Passport"}
                 </button>
               )}
             </div>
 
-            {/* Right: Voice agent */}
+            {/* ---- Right: Voice agent ---- */}
             <div style={S.rightCol}>
               <div style={S.colHeader}>VOICE SAFETY FOREMAN</div>
 
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: "8px 0" }}>
-                <button
-                  className="aqua-btn"
-                  style={{
-                    width: 100, height: 100, borderRadius: "50%",
-                    display: "flex", flexDirection: "column", alignItems: "center",
-                    justifyContent: "center", gap: 6, transition: "background 0.2s",
-                    background: agentActive
-                      ? "linear-gradient(180deg, #88ffaa 0%, #00cc44 40%, #008822 100%)"
-                      : undefined,
-                    borderColor: agentActive ? "#006618" : undefined,
-                    color:       agentActive ? "#003308" : undefined,
-                  }}
-                  onClick={toggleAgent}
-                >
-                  <span style={{ fontSize: 20, fontFamily: "var(--font-mono)" }}>
-                    {agentActive ? "[REC]" : "[MIC]"}
-                  </span>
-                  <span style={{ fontSize: 10, letterSpacing: "0.06em" }}>
-                    {agentActive ? "TAP TO END" : "TAP TO SPEAK"}
-                  </span>
-                </button>
+              {/* Mic button centered with canvas visualizer */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "10px 0 6px" }}>
+                <MicButton active={agentActive} onClick={toggleAgent} getFrequency={stableFreq} />
+
+                {/* Channel pills */}
+                <div style={{ display: "flex", gap: 6 }}>
+                  {[
+                    { label: "MIC IN",    on: agentActive },
+                    { label: "AGENT OUT", on: agentActive && !!ELEVENLABS_AGENT_ID },
+                    { label: "48kHz",     on: agentActive },
+                  ].map(({ label, on }) => (
+                    <div key={label} style={S.pill}>
+                      <div className={`led ${on ? "green" : "gray"}`} style={{ width: 7, height: 7 }} />
+                      <span>{label}</span>
+                    </div>
+                  ))}
+                </div>
 
                 {!ELEVENLABS_AGENT_ID && (
                   <div className="inset-panel" style={{
                     fontSize: 10, color: "#885500", textAlign: "center",
-                    padding: "6px 10px", maxWidth: 260, lineHeight: 1.5,
+                    padding: "5px 12px", lineHeight: 1.5,
                     background: "rgba(255,153,0,0.1)", borderColor: "rgba(255,153,0,0.3)",
                   }}>
-                    Demo mode -- set ELEVENLABS_AGENT_ID at the top of this file to go live
+                    Demo mode -- mic is real, agent audio simulated
                   </div>
                 )}
               </div>
 
               <div className="divider" />
 
+              {/* Transcript */}
               <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
                 <div style={S.colHeader}>TRANSCRIPT</div>
                 <div className="inset-panel" style={{
                   display: "flex", flexDirection: "column", gap: 8,
-                  padding: 8, minHeight: 120, maxHeight: 220, overflowY: "auto",
+                  padding: 8, minHeight: 80, maxHeight: 180, overflowY: "auto",
                 }}>
                   {transcript.map((msg, i) => (
                     <div key={i} style={{ display: "flex", gap: 6 }}>
@@ -383,9 +479,7 @@ export default function AssemblyPage() {
                       }}>
                         {msg.role === "agent" ? "FOREMAN:" : "TECH:"}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--text)", lineHeight: 1.5 }}>
-                        {msg.text}
-                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text)", lineHeight: 1.5 }}>{msg.text}</div>
                     </div>
                   ))}
                 </div>
@@ -409,7 +503,7 @@ export default function AssemblyPage() {
 
           <div className="divider" style={{ margin: "0 8px" }} />
           <div style={S.statusBar}>
-            <span>{allDone ? "All steps complete -- ready to finalise." : `${total - progress} steps remaining.`}</span>
+            <span>{allDone ? "All steps complete -- ready to finalise." : `${SAFETY_STEPS.length - done.size} steps remaining.`}</span>
             <span style={{ fontFamily: "var(--font-mono)" }}>Agent: {ELEVENLABS_AGENT_ID ?? "not configured"}</span>
           </div>
 
@@ -418,7 +512,7 @@ export default function AssemblyPage() {
 
       <div style={S.taskbar}>
         <button className="aqua-btn" onClick={() => navigate("/audit")}>ReVolt OS</button>
-        <div style={S.clock}>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+        <LiveClock />
       </div>
     </div>
   );
@@ -435,5 +529,5 @@ const S = {
   colHeader: { fontSize: 9, fontWeight: "bold", color: "var(--text-dim)", letterSpacing: "0.14em", marginBottom: 2 },
   statusBar: { display: "flex", justifyContent: "space-between", padding: "4px 10px", background: "rgba(200,215,235,0.8)", fontSize: 10, color: "var(--text-dim)" },
   taskbar:   { background: "linear-gradient(180deg, #3a6aaa 0%, #1a4a88 100%)", borderTop: "1px solid #6090cc", padding: "4px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 -2px 8px rgba(0,0,0,0.4)" },
-  clock:     { color: "#ddeeff", fontSize: 11, fontFamily: "var(--font-mono)", background: "rgba(0,0,0,0.3)", padding: "2px 8px", borderRadius: 2 },
+  pill:      { display: "flex", alignItems: "center", gap: 4, fontSize: 9, fontWeight: "bold", color: "var(--text-dim)", letterSpacing: "0.05em", background: "rgba(255,255,255,0.28)", border: "1px solid rgba(100,140,200,0.4)", borderRadius: 2, padding: "2px 6px" },
 };
