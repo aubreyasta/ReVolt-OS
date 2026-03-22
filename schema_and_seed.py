@@ -735,6 +735,162 @@ def seed_sample_data(collection):
             },
             "safety_risks": [],
         },
+        
+        # === KNOWN FAILURE STATE PROFILES ===
+        # These are reference batteries representing KNOWN bad patterns.
+        # When /api/batteries/identify runs, Vector Search compares mystery
+        # batteries against these to detect failures. This is the
+        # "library of known failure states" from the landing page.
+        
+        {
+            "battery_id": "FAIL-THERMAL-RUNAWAY-001",
+            "status": "Certified",
+            "manufacturer": {
+                "name": "Reference Profile",
+                "model": "Thermal Runaway Signature",
+                "chemistry": "NMC",
+                "nominal_voltage": 3.7,
+                "nominal_capacity_kwh": 60.0,
+                "manufacture_date": "2020-01-01",
+            },
+            "health_grade": "F",
+            "health_details": {
+                "state_of_health_pct": 42.0,
+                "remaining_useful_life_years": 0.0,
+                "total_cycles": 2200,
+                "peak_temp_recorded_c": 78.5,
+                "avg_discharge_rate_c": 2.1,
+                "physical_condition": "Severe thermal damage — casing warped",
+                "gemini_analysis_summary": "FAILURE REFERENCE: Thermal runaway precursor. Extreme temps (78C+) with rapid capacity fade. SEI decomposition confirmed. DO NOT upcycle — recycle only.",
+                "audit_timestamp": now,
+            },
+            "provenance": {
+                "original_vehicle": "Reference — not a real vehicle",
+                "vehicle_vin_hash": "FAILURE_PROFILE",
+                "climate_zone": "Extreme heat — failure reference",
+                "years_in_service": 0.0,
+                "removal_reason": "Known failure state reference profile",
+            },
+            "telemetry_summary": {
+                "voltage_min": 2.1, "voltage_max": 4.3, "voltage_mean": 3.2,
+                "temp_min_c": 25.0, "temp_max_c": 78.5, "temp_mean_c": 48.0,
+                "capacity_fade_pct": 58.0, "data_points_count": 500,
+                "discharge_curve_shape": "Knee",
+            },
+            "behavior_embedding": generate_fake_embedding(seed_value=100),
+            "listing": {
+                "title": "FAILURE REFERENCE — Thermal Runaway Pattern",
+                "description": "Reference profile for thermal runaway precursors. Not for sale.",
+                "asking_price_usd": 0.0, "seller_id": "system-reference",
+                "listed_at": now, "photo_urls": [],
+            },
+            "created_at": now, "updated_at": now,
+            "audit_manifest": {"version": "1.0", "generated_by": "System", "passport_id": "FAIL-THERMAL-RUNAWAY-001", "grade": "F", "recommended_use": ["Recycle only"], "warnings": ["Thermal runaway precursor detected"]},
+            "safety_workflow": {"current_state": "Not Started", "technician_id": None, "target_config": None, "started_at": None, "completed_at": None, "compliance_log": []},
+            "safety_risks": [
+                {"risk_type": "Thermal", "severity": "Critical", "description": "Peak temp 78.5C — thermal runaway precursor. SEI layer decomposition likely.", "mitigation": "DO NOT disassemble. Send to certified recycler.", "detected_by": "gemini_csv"},
+            ],
+        },
+        {
+            "battery_id": "FAIL-LITHIUM-PLATING-001",
+            "status": "Certified",
+            "manufacturer": {
+                "name": "Reference Profile",
+                "model": "Lithium Plating Signature",
+                "chemistry": "NMC",
+                "nominal_voltage": 3.7,
+                "nominal_capacity_kwh": 75.0,
+                "manufacture_date": "2021-01-01",
+            },
+            "health_grade": "D",
+            "health_details": {
+                "state_of_health_pct": 61.0,
+                "remaining_useful_life_years": 0.5,
+                "total_cycles": 900,
+                "peak_temp_recorded_c": 35.0,
+                "avg_discharge_rate_c": 0.4,
+                "physical_condition": "White deposits visible near terminals",
+                "gemini_analysis_summary": "FAILURE REFERENCE: Lithium plating pattern. Rapid capacity loss despite low thermal stress. Cold-climate fast charging caused metallic lithium deposits on anode.",
+                "audit_timestamp": now,
+            },
+            "provenance": {
+                "original_vehicle": "Reference — not a real vehicle",
+                "vehicle_vin_hash": "FAILURE_PROFILE",
+                "climate_zone": "Cold climate — failure reference",
+                "years_in_service": 0.0,
+                "removal_reason": "Known failure state reference profile",
+            },
+            "telemetry_summary": {
+                "voltage_min": 3.1, "voltage_max": 4.2, "voltage_mean": 3.65,
+                "temp_min_c": -15.0, "temp_max_c": 35.0, "temp_mean_c": 5.0,
+                "capacity_fade_pct": 39.0, "data_points_count": 600,
+                "discharge_curve_shape": "Knee",
+            },
+            "behavior_embedding": generate_fake_embedding(seed_value=101),
+            "listing": {
+                "title": "FAILURE REFERENCE — Lithium Plating Pattern",
+                "description": "Reference profile for lithium plating from cold-climate fast charging. Not for sale.",
+                "asking_price_usd": 0.0, "seller_id": "system-reference",
+                "listed_at": now, "photo_urls": [],
+            },
+            "created_at": now, "updated_at": now,
+            "audit_manifest": {"version": "1.0", "generated_by": "System", "passport_id": "FAIL-LITHIUM-PLATING-001", "grade": "D", "recommended_use": ["Cell-level testing only"], "warnings": ["Lithium plating detected — internal short circuit risk"]},
+            "safety_workflow": {"current_state": "Not Started", "technician_id": None, "target_config": None, "started_at": None, "completed_at": None, "compliance_log": []},
+            "safety_risks": [
+                {"risk_type": "Chemical", "severity": "High", "description": "Lithium plating — metallic lithium deposits on anode from cold-climate fast charging below -10C.", "mitigation": "Do not fast-charge. Individual cell impedance testing required.", "detected_by": "gemini_csv"},
+                {"risk_type": "Electrical", "severity": "High", "description": "Internal resistance elevated 40% above nominal — dendrite growth risk.", "mitigation": "Risk of internal short circuit. Handle with extreme caution.", "detected_by": "gemini_csv"},
+            ],
+        },
+        {
+            "battery_id": "FAIL-CELL-IMBALANCE-001",
+            "status": "Certified",
+            "manufacturer": {
+                "name": "Reference Profile",
+                "model": "Severe Cell Imbalance Signature",
+                "chemistry": "LFP",
+                "nominal_voltage": 3.2,
+                "nominal_capacity_kwh": 50.0,
+                "manufacture_date": "2019-06-01",
+            },
+            "health_grade": "D",
+            "health_details": {
+                "state_of_health_pct": 65.0,
+                "remaining_useful_life_years": 1.0,
+                "total_cycles": 1500,
+                "peak_temp_recorded_c": 42.0,
+                "avg_discharge_rate_c": 0.6,
+                "physical_condition": "Uneven swelling across module — cells 3 and 7 bulging",
+                "gemini_analysis_summary": "FAILURE REFERENCE: Severe cell imbalance. Voltage delta exceeds 0.5V across cells. Weakest cells limiting pack performance. BMS override events detected.",
+                "audit_timestamp": now,
+            },
+            "provenance": {
+                "original_vehicle": "Reference — not a real vehicle",
+                "vehicle_vin_hash": "FAILURE_PROFILE",
+                "climate_zone": "Mixed — failure reference",
+                "years_in_service": 0.0,
+                "removal_reason": "Known failure state reference profile",
+            },
+            "telemetry_summary": {
+                "voltage_min": 2.4, "voltage_max": 3.65, "voltage_mean": 3.0,
+                "temp_min_c": 8.0, "temp_max_c": 42.0, "temp_mean_c": 22.0,
+                "capacity_fade_pct": 35.0, "data_points_count": 900,
+                "discharge_curve_shape": "Knee",
+            },
+            "behavior_embedding": generate_fake_embedding(seed_value=102),
+            "listing": {
+                "title": "FAILURE REFERENCE — Severe Cell Imbalance",
+                "description": "Reference profile for dangerous cell imbalance patterns. Not for sale.",
+                "asking_price_usd": 0.0, "seller_id": "system-reference",
+                "listed_at": now, "photo_urls": [],
+            },
+            "created_at": now, "updated_at": now,
+            "audit_manifest": {"version": "1.0", "generated_by": "System", "passport_id": "FAIL-CELL-IMBALANCE-001", "grade": "D", "recommended_use": ["Cell-level sorting and testing"], "warnings": ["Severe cell imbalance — pack-level use unsafe"]},
+            "safety_workflow": {"current_state": "Not Started", "technician_id": None, "target_config": None, "started_at": None, "completed_at": None, "compliance_log": []},
+            "safety_risks": [
+                {"risk_type": "Electrical", "severity": "Critical", "description": "Cell voltage delta of 0.5V+ — weakest cells at risk of reversal under load.", "mitigation": "Individual cell testing required. Do not charge as a pack.", "detected_by": "gemini_csv"},
+                {"risk_type": "Structural", "severity": "Medium", "description": "Uneven swelling in cells 3 and 7 suggests electrode delamination.", "mitigation": "Physical inspection of swollen cells before any handling.", "detected_by": "gemini_vision"},
+            ],
+        },
     ]
     
     # Clear any existing sample data (safe for re-runs during development)
