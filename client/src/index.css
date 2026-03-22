@@ -1,237 +1,185 @@
 /* =============================================================================
-   ReVolt OS -- Global Styles
-   Theme: macOS Aqua / Y2K industrial (2001-era OS chrome)
-   This file must be imported in main.jsx as the first import.
-   Tailwind is included for utility classes but the design
-   is primarily driven by the CSS variables and classes below.
+   ReVolt OS -- Global Styles (Refined Modern)
+   Theme: Steel-blue industrial with macOS chrome accents
+   Replaces the Y2K Aqua theme with a cleaner, modern take that
+   keeps the OS-window personality but feels 2026.
    ============================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;700&family=Tahoma:wght@400;700&display=swap');
-@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* -----------------------------------------------------------------------------
-   CSS Variables
-   All colours, shadows, and fonts are defined here.
-   Components reference these via var(--name) so the theme is easy to change.
-   ----------------------------------------------------------------------------- */
 :root {
-  --bg:          #c8d4e8;
-  --desktop:     #6b8cba;
-  --win-bg:      rgba(200, 212, 232, 0.92);
-  --win-border:  #7a9cc8;
+  --bg:          #b8c6d4;
+  --desktop:     linear-gradient(160deg, #a8b8cc 0%, #c0cedc 50%, #b0c0d0 100%);
+  --win-bg:      #dce3ec;
+  --win-border:  #8a9bb0;
 
-  /* Titlebar gradients -- Aqua blue pill style */
-  --titlebar:    linear-gradient(180deg, #4a7fc1 0%, #2a5fa0 40%, #1e4f8a 100%);
-  --titlebar-h:  linear-gradient(180deg, #6a9fd8 0%, #4a7fc1 40%, #3060a8 100%);
+  --titlebar:    linear-gradient(180deg, #5a7a9a 0%, #3d5d7d 100%);
+  --titlebar-h:  linear-gradient(180deg, #6a8aaa 0%, #4a6a8a 100%);
 
-  /* Button gradients */
-  --btn:         linear-gradient(180deg, #e8eff8 0%, #c8d8f0 50%, #a8c0e8 100%);
-  --btn-press:   linear-gradient(180deg, #a8c0e8 0%, #c8d8f0 100%);
-  --btn-border:  #6090c0;
+  --btn:         linear-gradient(180deg, #f0f3f7 0%, #dce3eb 100%);
+  --btn-press:   linear-gradient(180deg, #d0d8e2 0%, #e4eaf0 100%);
+  --btn-border:  #8a9bb0;
 
-  --aqua-blue:   #4a9fd8;
-  --aqua-glow:   rgba(74,159,216,0.4);
+  --aqua-blue:   #2860a0;
+  --aqua-glow:   rgba(40,96,160,0.3);
 
-  /* Text colours */
-  --text:        #0a1a2e;
-  --text-dim:    #3a5a7e;
+  --text:        #1a2a3a;
+  --text-dim:    #4a6278;
 
-  /* Status colours */
-  --green:       #00cc44;
-  --amber:       #ff9900;
-  --red:         #dd2222;
+  --green:       #1e8449;
+  --amber:       #b7700a;
+  --red:         #c0392b;
 
-  /* Shadow utilities */
-  --inset:  inset 2px 2px 4px rgba(0,0,0,0.25), inset -1px -1px 2px rgba(255,255,255,0.6);
-  --raise:  2px 2px 0px rgba(0,0,0,0.4), -1px -1px 0px rgba(255,255,255,0.8);
+  --inset:  inset 1px 1px 3px rgba(0,0,0,0.12), inset -1px -1px 2px rgba(255,255,255,0.5);
+  --raise:  0 1px 3px rgba(0,0,0,0.1), 0 0 0 1px rgba(0,0,0,0.04);
 
-  --font-ui:   'Tahoma', 'Geneva', sans-serif;
-  --font-mono: 'Courier New', monospace;
+  --font-ui:   'Inter', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+
+  --radius: 8px;
+  --radius-sm: 5px;
+  --radius-lg: 12px;
 }
 
 html, body, #root {
-  width: 100%;
-  min-height: 100vh;
-  background: var(--desktop);
+  width: 100%; min-height: 100vh;
+  background: var(--bg);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
+  -webkit-font-smoothing: antialiased;
 }
 
 button { cursor: pointer; font-family: var(--font-ui); font-size: 12px; }
 input  { font-family: var(--font-ui); font-size: 12px; }
 
-/* -----------------------------------------------------------------------------
-   .aqua-btn
-   Standard bevelled button used everywhere in the app.
-   Add class "primary" for the blue filled variant.
-   ----------------------------------------------------------------------------- */
+/* ── .aqua-btn  ── */
 .aqua-btn {
   background: var(--btn);
   border: 1px solid var(--btn-border);
-  border-bottom-color: #3070a0;
-  border-right-color: #4080b0;
   box-shadow: var(--raise);
-  padding: 4px 14px;
+  padding: 5px 14px;
   color: var(--text);
-  border-radius: 3px;
-  font-weight: bold;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
   font-size: 11px;
-  letter-spacing: 0.02em;
-  transition: filter 0.1s;
+  letter-spacing: 0.01em;
+  transition: all 0.15s;
   white-space: nowrap;
 }
+.aqua-btn:hover { filter: brightness(0.97); }
 .aqua-btn:active {
   background: var(--btn-press);
   box-shadow: var(--inset);
   transform: translateY(1px);
 }
 .aqua-btn.primary {
-  background: linear-gradient(180deg, #5ab0f0 0%, #2a80d0 40%, #1060b0 100%);
-  border-color: #1050a0;
+  background: linear-gradient(180deg, #3a7acc, #2860a0);
+  border-color: #1a4a80;
   color: #fff;
 }
+.aqua-btn.primary:hover { filter: brightness(1.08); }
 .aqua-btn.primary:active {
-  background: linear-gradient(180deg, #1060b0 0%, #2a80d0 100%);
+  background: linear-gradient(180deg, #2860a0, #1a4a80);
 }
-.aqua-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.aqua-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* -----------------------------------------------------------------------------
-   .window
-   The outer container for every page's main content area.
-   Gives the OS window chrome appearance.
-   ----------------------------------------------------------------------------- */
+/* ── .window ── */
 .window {
   background: var(--win-bg);
   border: 1px solid var(--win-border);
-  border-radius: 6px 6px 4px 4px;
-  box-shadow: 3px 3px 12px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.7);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.1);
   overflow: hidden;
 }
 
-/* -----------------------------------------------------------------------------
-   .titlebar
-   The blue gradient bar at the top of each window.
-   Contains traffic lights + centred title text.
-   ----------------------------------------------------------------------------- */
+/* ── .titlebar ── */
 .titlebar {
   background: var(--titlebar);
-  padding: 4px 8px;
+  padding: 7px 12px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   user-select: none;
 }
 .titlebar-title {
   color: #fff;
-  font-size: 11px;
-  font-weight: bold;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  font-size: 12px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
   flex: 1;
   text-align: center;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
 }
 
-/* -----------------------------------------------------------------------------
-   .traffic-lights / .tl
-   macOS-style close/min/max dots in the titlebar.
-   The "close" dot on PassportPage and AssemblyPage calls navigate(-1)
-   via an onClick -- see those files.
-   ----------------------------------------------------------------------------- */
-.traffic-lights { display: flex; gap: 4px; }
+/* ── .traffic-lights ── */
+.traffic-lights { display: flex; gap: 6px; }
 .tl {
   width: 12px; height: 12px; border-radius: 50%;
-  border: 1px solid rgba(0,0,0,0.3);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+  border: 1px solid rgba(0,0,0,0.15);
 }
-.tl.close { background: radial-gradient(circle at 40% 35%, #ff8080, #cc0000); }
-.tl.min   { background: radial-gradient(circle at 40% 35%, #ffee80, #cc9900); }
-.tl.max   { background: radial-gradient(circle at 40% 35%, #80ee80, #009900); }
+.tl.close { background: #ff5f57; }
+.tl.min   { background: #febc2e; }
+.tl.max   { background: #28c840; }
 
-/* -----------------------------------------------------------------------------
-   .inset-panel
-   Recessed content area -- used for data panels, drop zones, transcripts.
-   Gives the appearance of a sunken region in the window.
-   ----------------------------------------------------------------------------- */
+/* ── .inset-panel ── */
 .inset-panel {
-  background: rgba(255,255,255,0.45);
-  border: 1px solid rgba(100,140,200,0.5);
-  border-top-color: rgba(0,0,60,0.2);
-  border-left-color: rgba(0,0,60,0.2);
+  background: rgba(255,255,255,0.55);
+  border: 1px solid rgba(138,155,176,0.35);
   box-shadow: var(--inset);
-  border-radius: 2px;
-  padding: 8px;
+  border-radius: var(--radius-sm);
+  padding: 10px;
 }
 
-/* -----------------------------------------------------------------------------
-   .lcd
-   Green-on-black LCD readout style.
-   Used for passport IDs, battery identity strings, config codes.
-   ----------------------------------------------------------------------------- */
+/* ── .lcd ── */
 .lcd {
-  background: #0a1a08;
-  color: #00ff44;
+  background: #0f1a12;
+  color: #00dd44;
   font-family: var(--font-mono);
   font-size: 11px;
   padding: 4px 8px;
-  border: 1px solid #003310;
-  box-shadow: inset 2px 2px 6px rgba(0,0,0,0.8);
-  letter-spacing: 0.05em;
+  border: 1px solid #1a3020;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
 }
 
-/* -----------------------------------------------------------------------------
-   .led
-   Physical indicator LED.
-   Usage: <div class="led green" /> | amber | red | gray
-   The blinking animation is applied inline via style={{ animation: "blink ..." }}
-   ----------------------------------------------------------------------------- */
+/* ── .led ── */
 .led {
-  width: 10px; height: 10px; border-radius: 50%;
-  border: 1px solid rgba(0,0,0,0.4);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.2);
   flex-shrink: 0;
 }
-.led.green { background: radial-gradient(circle at 40% 35%, #88ff88, #00aa22); box-shadow: 0 0 6px #00ff44, inset 0 1px 0 rgba(255,255,255,0.4); }
-.led.amber { background: radial-gradient(circle at 40% 35%, #ffdd88, #cc7700); box-shadow: 0 0 6px #ffaa00, inset 0 1px 0 rgba(255,255,255,0.4); }
-.led.red   { background: radial-gradient(circle at 40% 35%, #ff8888, #cc0000); box-shadow: 0 0 6px #ff2222, inset 0 1px 0 rgba(255,255,255,0.4); }
-.led.gray  { background: radial-gradient(circle at 40% 35%, #cccccc, #888888); }
+.led.green { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.6); }
+.led.amber { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.6); }
+.led.red   { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.6); }
+.led.gray  { background: #9ca3af; }
 
-/* -----------------------------------------------------------------------------
-   .progress-track / .progress-fill
-   LCD-style progress bar. Fill width is set inline as a percentage.
-   Used on AuditPage loading state and AssemblyPage checklist progress.
-   ----------------------------------------------------------------------------- */
+/* ── .progress-track ── */
 .progress-track {
-  background: #0a1a08;
-  border: 1px solid #334;
+  background: #0f1a12;
+  border: 1px solid #1a3020;
   box-shadow: var(--inset);
-  height: 14px;
-  border-radius: 2px;
+  height: 12px;
+  border-radius: 3px;
   overflow: hidden;
 }
 .progress-fill {
   height: 100%;
-  background: linear-gradient(180deg, #44ff88 0%, #00cc44 50%, #008822 100%);
-  box-shadow: 0 0 8px rgba(0,255,68,0.5);
+  background: linear-gradient(180deg, #34d399, #059669);
+  box-shadow: 0 0 6px rgba(5,150,105,0.4);
   transition: width 0.5s ease;
 }
 
-/* -----------------------------------------------------------------------------
-   .divider
-   Subtle horizontal rule between sections inside a panel or card.
-   ----------------------------------------------------------------------------- */
+/* ── .divider ── */
 .divider {
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0,0,60,0.2) 20%, rgba(0,0,60,0.2) 80%, transparent);
+  background: linear-gradient(90deg, transparent, rgba(138,155,176,0.3) 20%, rgba(138,155,176,0.3) 80%, transparent);
   margin: 6px 0;
 }
 
-/* -----------------------------------------------------------------------------
-   Keyframe animations
-   blink -- used on active LEDs (agent status, thermal warning)
-   scan  -- reserved for future use (scan line effect)
-   ----------------------------------------------------------------------------- */
+/* ── Keyframes ── */
 @keyframes blink { 0%,100%{ opacity:1 } 50%{ opacity:0 } }
-@keyframes scan  { 0%{ transform:translateY(-100%) } 100%{ transform:translateY(400%) } }
+@keyframes fadeIn { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:translateY(0) } }
+@keyframes spin { to { transform: rotate(360deg) } }
