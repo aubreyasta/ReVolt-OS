@@ -14,6 +14,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useConversation } from "@elevenlabs/react";
 import QRCode from "react-qr-code";
 
+// Add this near the top of WorkspacePage.jsx, before the components
+const safe = (val) => {
+  if (val === null || val === undefined) return "—";
+  if (typeof val === "object") return JSON.stringify(val);
+  return val;
+};
+
 const SAFETY_STEPS = [
   "Confirm PPE: insulated gloves, face shield, arc-flash suit",
   "Verify battery discharged below 5V total pack voltage",
@@ -50,6 +57,8 @@ function PassportSidebar({ manifest, width }) {
 
   // QR code URL — points to the passport page which can be printed as PDF
   const passportUrl = window.location.origin + "/passport/" + (manifest.battery_id ?? "unknown");
+
+console.log("manifest keys:", JSON.stringify(manifest, null, 2));
 
   return (
     <div style={{ width, height: "100%", overflowY: "auto", padding: 12, background: "var(--win-bg)", borderRight: "1px solid var(--win-border)", fontSize: 11, color: "var(--text-dim)" }}>
