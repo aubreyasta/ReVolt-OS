@@ -121,6 +121,31 @@ def health_check():
         return jsonify({"status": "error", "database": str(e)}), 500
 
 
+# ============================================
+# ENDPOINT: GET /api/config
+# ============================================
+@app.route("/api/config", methods=["GET"])
+def get_config():
+    """
+    Return non-secret configuration the frontend needs.
+
+    WHO USES THIS:
+      Person 4 (React) → AssemblyPage.jsx fetches this on mount to get
+      the ElevenLabs agent ID so it can start a WebRTC conversation session.
+
+    WHY NOT HARDCODE IT:
+      The agent ID lives in the backend's .env file. This way Person 3 can
+      change the agent (or create a new one) without touching the frontend code.
+
+    WHAT IT RETURNS:
+      { "elevenlabs_agent_id": "..." }   — if ELEVENLABS_AGENT_ID is set in .env
+      { "elevenlabs_agent_id": null }    — if not configured yet
+    """
+    return jsonify({
+        "elevenlabs_agent_id": os.getenv("ELEVENLABS_AGENT_ID"),
+    })
+
+
 # --- LIST ALL BATTERIES ---
 @app.route("/api/batteries", methods=["GET"])
 def list_batteries():
@@ -851,6 +876,168 @@ def get_battery_blueprint(battery_id):
 
 
 # --- CHANGE STREAM WATCHER (Updated for Safety Workflow) ---
+
+# ============================================
+# ENDPOINT: POST /api/audit
+# ============================================
+@app.route("/api/audit", methods=["POST"])
+def run_audit_endpoint():
+    """
+    Run the full Gemini audit pipeline from the frontend.
+
+    WHO USES THIS:
+      Person 4 (React) → AuditPage.jsx sends a multipart form with:
+        - image:    the battery sticker photo (JPG/PNG)
+        - csv_file: the telemetry CSV
+
+    WHAT IT DOES:
+      1. Saves the uploaded files to a temp directory
+      2. Imports and runs the full audit pipeline from audit.py
+      3. Returns the complete Digital Twin manifest as JSON
+
+    RETURNS:
+      The full Digital Twin document (same as manifest.json), including
+      the upcycle_blueprint if the battery passes the audit gate.
+    """
+    import tempfile
+    import importlib.util
+
+    # Validate uploads
+    if "csv_file" not in request.files:
+        return jsonify({"error": "csv_file is required"}), 400
+
+    csv_file = request.files["csv_file"]
+    image_file = request.files.get("image")
+
+    # Save to temp files
+    tmp_dir = tempfile.mkdtemp()
+    csv_path = os.path.join(tmp_dir, csv_file.filename or "telemetry.csv")
+    csv_file.save(csv_path)
+
+    image_path = None
+    if image_file and image_file.filename:
+        image_path = os.path.join(tmp_dir, image_file.filename)
+        image_file.save(image_path)
+
+    try:
+        # Import audit.py dynamically (it lives in .scripts/)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        audit_path = os.path.join(script_dir, "audit.py")
+
+        spec = importlib.util.spec_from_file_location("audit_module", audit_path)
+        audit_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(audit_module)
+
+        # Run the full pipeline
+        digital_twin = audit_module.build_digital_twin(csv_path, image_path)
+
+        # Save manifest locally
+        audit_module.save_manifest(digital_twin)
+
+        # Push to MongoDB via our own create endpoint
+        audit_module.push_to_api(digital_twin)
+
+        # Generate PDF passport
+        pdf_path = audit_module.generate_passport_pdf(digital_twin)
+
+        # Upload to ElevenLabs if configured
+        audit_module.upload_to_elevenlabs(pdf_path, digital_twin["battery_id"])
+
+        # Return the full manifest to the frontend
+        # Remove the embedding (it's huge and the frontend doesn't need it)
+        response_data = {k: v for k, v in digital_twin.items() if k != "behavior_embedding"}
+
+        # The frontend expects passport_id at the top level for navigation
+        response_data["passport_id"] = digital_twin["battery_id"]
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        # Clean up temp files
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+# ============================================
+# ENDPOINT: POST /api/batteries/<id>/complete-assembly
+# ============================================
+@app.route("/api/batteries/<battery_id>/complete-assembly", methods=["POST"])
+def complete_assembly(battery_id):
+    """
+    Record that a technician has completed the assembly/disassembly process.
+
+    WHO USES THIS:
+      Person 4 (React) → AssemblyPage.jsx calls this when all safety steps
+      are checked off and the technician clicks "Complete Assembly".
+
+    WHAT IT DOES:
+      1. Validates the battery exists
+      2. Records the assembly completion in the safety_workflow
+      3. Updates the battery status to reflect completion
+      4. Returns the updated record
+
+    BODY (JSON):
+      {
+        "passport_id": "RVX-2026-...",
+        "completed_at": "2026-03-22T...",
+        "steps_completed": 6,
+        "steps_total": 6,
+        "step_labels": ["Step 1 label", ...],
+        "verified": false
+      }
+    """
+    battery = collection.find_one({"battery_id": battery_id})
+    if not battery:
+        return jsonify({"error": f"Battery {battery_id} not found"}), 404
+
+    data = request.get_json() or {}
+    now = datetime.now(timezone.utc)
+
+    # Build the assembly record
+    assembly_record = {
+        "passport_id": battery_id,
+        "completed_at": data.get("completed_at", now.isoformat()),
+        "steps_completed": data.get("steps_completed", 0),
+        "steps_total": data.get("steps_total", 0),
+        "step_labels": data.get("step_labels", []),
+        "verified": data.get("verified", False),
+    }
+
+    # Update the battery document
+    collection.update_one(
+        {"battery_id": battery_id},
+        {
+            "$set": {
+                "safety_workflow.current_state": "Complete",
+                "safety_workflow.completed_at": now,
+                "assembly_record": assembly_record,
+                "updated_at": now,
+            },
+            "$push": {
+                "safety_workflow.compliance_log": {
+                    "state": "Complete",
+                    "action": "Assembly completed by technician",
+                    "confirmed_by": "technician",
+                    "timestamp": now,
+                    "notes": f"{assembly_record['steps_completed']}/{assembly_record['steps_total']} steps completed",
+                    "safety_check_passed": True,
+                }
+            },
+        },
+    )
+
+    return jsonify({
+        **assembly_record,
+        "battery_id": battery_id,
+        "status": "complete",
+    })
+
+
 @app.route("/api/watch/disassembly", methods=["GET"])
 def watch_disassembly_info():
     """
@@ -980,16 +1167,19 @@ if __name__ == "__main__":
     # Print available endpoints for the team
     print("\n📡 Available endpoints:")
     print(f"  GET  /api/health                    → Health check")
+    print(f"  GET  /api/config                    → Frontend config (ElevenLabs agent ID)")
     print(f"  GET  /api/batteries                 → List all batteries")
     print(f"  GET  /api/batteries/<id>            → Get battery details")
     print(f"  GET  /api/batteries/<id>/passport   → Get Battery Passport")
     print(f"  POST /api/batteries                 → Create/update battery")
+    print(f"  POST /api/audit                     → Run full Gemini audit (image + CSV)")
     print(f"  POST /api/batteries/search          → Vector similarity search")
     print(f"  POST /api/batteries/identify        → Mystery battery ID (Whitepaper)")
     print(f"  GET  /api/batteries/<id>/safety     → Get safety workflow state")
     print(f"  PATCH /api/batteries/<id>/safety     → Advance/log safety step")
     print(f"  PATCH /api/batteries/<id>/status     → Update marketplace status")
     print(f"  GET  /api/batteries/<id>/blueprint  → Get upcycle blueprint")
+    print(f"  POST /api/batteries/<id>/complete-assembly → Record assembly completion")
     print()
     
     # Start the server
