@@ -1,46 +1,42 @@
-/* =============================================================================
-   pages/PassportPage.jsx -- Page 2 of 3
-
-   PURPOSE:
-     Renders the full Battery Passport for a completed audit.
-     Two entry paths:
-       a) From AuditPage after a successful audit -- manifest arrives via
-          React Router location.state. This works immediately with no backend.
-       b) Direct URL / deep-link to /passport/:id -- requires a MongoDB fetch.
-          Currently shows a "Not Found" error until the fetch is wired up.
-
-   BACKEND DEPENDENCY -- persistent passport fetch:
-     Currently the manifest is read only from React Router location.state,
-     which exists only during the current browser session. If the user refreshes
-     or navigates directly to /passport/:id, the manifest will be null and the
-     error state below will show.
-
-     To fix this, once GET /api/batteries/:id is wired to MongoDB in main.py,
-     replace the current manifest declaration with the following:
-
-       const [manifest, setManifest] = useState(state?.manifest ?? null);
-       useEffect(() => {
-         if (manifest) return;  // already have it from router state, skip fetch
-         fetch("/api/batteries/" + id)
-           .then(r => r.ok ? r.json() : Promise.reject(r.status))
-           .then(setManifest)
-           .catch(() => setManifest(null));
-       }, [id]);
-
-     The QR code URL (passportUrl) will then resolve as a permanent deep-link.
-
-   BACKEND DEPENDENCY -- live battery status:
-     manifest.status is currently a static string set by audit.py ("listed").
-     Once MongoDB Change Streams are wired, the STATUS panel in the sidebar
-     should reflect real-time state changes:
-       "listed"               --> green LED
-       "disassembly_started"  --> amber LED (this status change also triggers
-                                   the ElevenLabs agent session in AssemblyPage)
-       "completed"            --> blue/gray LED
-     To implement: expose a Server-Sent Events endpoint in FastAPI
-     (e.g. GET /api/batteries/:id/status-stream) and subscribe to it here
-     with an EventSource. Update a local status state variable on each event.
-   ============================================================================= */
+// =============================================================================
+// frontend/src/pages/PassportPage.jsx -- Page 2 of 3
+//
+// CHANGES FROM PREVIOUS VERSION:
+//   - Status LED now maps the new Title Case status values from the backend:
+//       "Certified"           -> green
+//       "Listed"              -> green
+//       "Under Review"        -> amber
+//       "Disassembly Started" -> amber
+//       "Sold"                -> gray
+//   - Passport data is read from the new nested schema:
+//       manufacturer.name / model / chemistry  (was battery_id.*)
+//       health_details.state_of_health_pct     (was top-level state_of_health_pct)
+//       health_details.total_cycles            (was cycle_count)
+//       health_details.remaining_useful_life_years (was remaining_useful_life_years)
+//   - BACKEND DEPENDENCY comment updated with new endpoint paths.
+//
+// BACKEND DEPENDENCY -- persistent passport fetch:
+//   Once GET /api/batteries/:id/passport is live on the backend, add:
+//
+//     const [manifest, setManifest] = useState(state?.manifest ?? null);
+//     useEffect(() => {
+//       if (manifest) return;
+//       fetch("/api/batteries/" + id + "/passport")
+//         .then(r => r.ok ? r.json() : Promise.reject(r.status))
+//         .then(setManifest)
+//         .catch(() => setManifest(null));
+//     }, [id]);
+//
+//   Full document (all fields including embedding):
+//     GET /api/batteries/:id
+//   Passport only (lighter, no embedding):
+//     GET /api/batteries/:id/passport
+//
+// BACKEND DEPENDENCY -- live status updates:
+//   Status changes are written by PATCH /api/batteries/:id/status on the backend.
+//   To make the LED update in real-time, add an EventSource subscription here
+//   once the backend exposes a status stream endpoint.
+// =============================================================================
 
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import PassportCard from "../components/PassportCard";
@@ -49,17 +45,16 @@ export default function PassportPage() {
   const { state }  = useLocation();
   const { id }     = useParams();
   const navigate   = useNavigate();
-  const manifest   = state?.manifest;  // See BACKEND DEPENDENCY note above
+  const manifest   = state?.manifest;
 
-  /* passportUrl is the full public URL of this passport.
-     Used for the QR code in PassportCard and shown in the sidebar.
-     Becomes a real permanent link once GET /api/batteries/:id is live. */
   const passportUrl = manifest
-    ? `${window.location.origin}/passport/${manifest.passport_id}`
+    ? window.location.origin + "/passport/" + manifest.battery_id
     : null;
 
-  /* No manifest -- either direct link before MongoDB is wired,
-     or the session was lost (page refresh, etc.) */
+  const printDate = new Date().toLocaleDateString("en-GB", {
+    day: "2-digit", month: "long", year: "numeric",
+  });
+
   if (!manifest) {
     return (
       <div style={S.desktop}>
@@ -72,146 +67,134 @@ export default function PassportPage() {
               <div className="titlebar-title">Error -- Passport Not Found</div>
             </div>
             <div style={{ padding: 24, textAlign: "center", display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                No passport data for ID: <b>{id}</b>
-              </div>
+              <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No passport data for ID: <b>{id}</b></div>
               <div style={{ fontSize: 10, color: "var(--text-dim)" }}>
-                This will resolve once GET /api/batteries/:id is wired to MongoDB.
+                Resolves once GET /api/batteries/:id/passport is live on the backend.
               </div>
-              <button className="aqua-btn primary" onClick={() => navigate("/audit")}>
-                Back to Audit
-              </button>
+              <button className="aqua-btn primary" onClick={() => navigate("/audit")}>Back to Audit</button>
             </div>
           </div>
         </div>
-        <Taskbar />
+        <div style={S.taskbar} data-print="hide">
+          <span style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>ReVolt OS</span>
+          <span style={S.clock}>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+        </div>
       </div>
     );
   }
+
+  // Map backend status values to LED colours.
+  // Backend status values (from 01_schema_and_seed.py):
+  //   "Listed" | "Under Review" | "Certified" | "Sold" | "Disassembly Started"
+  const STATUS_LED = {
+    "Certified":           "green",
+    "Listed":              "green",
+    "Under Review":        "amber",
+    "Disassembly Started": "amber",
+    "Sold":                "gray",
+  };
+  const statusLed   = STATUS_LED[manifest.status] ?? "green";
+  const statusLabel = manifest.status ?? "Listed";
+
+  // Pull display values from new nested schema.
+  // All field mappings are documented in manifest.mock.js.
+  const hd  = manifest.health_details  ?? {};
+  const mfg = manifest.manufacturer    ?? {};
 
   return (
     <div style={S.desktop}>
       <div style={S.windowWrap}>
         <div className="window" style={S.window}>
 
-          {/* Titlebar -- close dot navigates back to /audit */}
           <div className="titlebar">
             <div className="traffic-lights">
               <div className="tl close" onClick={() => navigate("/audit")} style={{ cursor: "pointer" }} />
               <div className="tl min" />
               <div className="tl max" />
             </div>
-            <div className="titlebar-title">
-              Battery Passport -- {manifest.passport_id}
-            </div>
+            <div className="titlebar-title">Battery Passport -- {manifest.battery_id}</div>
           </div>
 
-          {/* Toolbar */}
-          <div style={S.toolbar}>
+          <div style={S.toolbar} data-print="hide">
             <button className="aqua-btn" onClick={() => navigate("/audit")}>New Audit</button>
-            {/* window.print() triggers the browser print dialog.
-                The page renders cleanly for PDF export as-is. */}
             <button className="aqua-btn" onClick={() => window.print()}>Print / Export PDF</button>
             <div style={{ flex: 1 }} />
-            {/* Navigates to AssemblyPage, passing manifest in router state.
-                This also conceptually changes the battery status to
-                "disassembly_started" -- once MongoDB is wired, this button
-                should also POST a status update to /api/batteries/:id/status */}
-            <button
-              className="aqua-btn primary"
-              onClick={() => navigate("/assembly", { state: { manifest } })}
-            >
+            <button className="aqua-btn primary" onClick={() => navigate("/assembly", { state: { manifest } })}>
               Start Assembly
             </button>
           </div>
 
-          <div className="divider" style={{ margin: "0 8px" }} />
+          <div className="divider" style={{ margin: "0 8px" }} data-print="hide" />
 
-          {/* Two-column body: sidebar (180px) + main passport card (flex) */}
           <div style={S.body}>
 
-            {/* Sidebar */}
-            <div style={S.sidebar}>
-
-              {/* Status panel
-                  LED colour and label are currently driven by the static
-                  manifest.status field. See BACKEND DEPENDENCY note above
-                  for how to make this real-time once MongoDB is wired. */}
+            {/* Sidebar -- hidden in print */}
+            <div style={S.sidebar} data-print="hide">
               <div className="inset-panel" style={S.sidePanel}>
                 <div style={S.sidePanelTitle}>STATUS</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                  <div className="led green" />
+                  <div className={`led ${statusLed}`} />
                   <span style={{ fontSize: 11, fontWeight: "bold", color: "var(--green)" }}>
-                    {(manifest.status ?? "listed").toUpperCase()}
+                    {statusLabel.toUpperCase()}
                   </span>
                 </div>
                 <div className="divider" />
-                <div style={S.sideRow}>
-                  <span>Grade</span>
-                  <span style={{ fontFamily: "var(--font-mono)", fontWeight: "bold" }}>{manifest.health_grade}</span>
-                </div>
-                <div style={S.sideRow}>
-                  <span>SOH</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{manifest.state_of_health_pct}%</span>
-                </div>
-                <div style={S.sideRow}>
-                  <span>Cycles</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{manifest.cycle_count}</span>
-                </div>
-                <div style={S.sideRow}>
-                  <span>RUL</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{manifest.remaining_useful_life_years} yr</span>
-                </div>
+                {/* Values from new nested schema */}
+                <div style={S.sideRow}><span>Grade</span><span style={{ fontFamily: "var(--font-mono)", fontWeight: "bold" }}>{manifest.health_grade}</span></div>
+                <div style={S.sideRow}><span>SOH</span><span style={{ fontFamily: "var(--font-mono)" }}>{hd.state_of_health_pct}%</span></div>
+                <div style={S.sideRow}><span>Cycles</span><span style={{ fontFamily: "var(--font-mono)" }}>{hd.total_cycles}</span></div>
+                <div style={S.sideRow}><span>RUL</span><span style={{ fontFamily: "var(--font-mono)" }}>{hd.remaining_useful_life_years} yr</span></div>
               </div>
-
               <div className="inset-panel" style={{ ...S.sidePanel, marginTop: 8 }}>
                 <div style={S.sidePanelTitle}>EU BATTERY REGULATION</div>
                 <div style={{ fontSize: 10, color: "var(--text-dim)", lineHeight: 1.6 }}>
-                  Compliant with EU 2023/1542.
-                  Issued by ReVolt OS.
+                  Compliant with EU 2023/1542. Issued by ReVolt OS.
                 </div>
               </div>
             </div>
 
-            {/* Main passport card -- PassportCard handles all inner sections */}
-            <div style={S.main} className="inset-panel">
+            {/* Main card */}
+            <div style={S.main} className="inset-panel print-no-break">
+              <div className="print-doc-header">
+                <div className="print-doc-header-logo">REVOLT OS</div>
+                <div className="print-doc-header-sub">
+                  Digital Battery Passport &nbsp;|&nbsp; {manifest.battery_id}
+                  &nbsp;|&nbsp; Issued {printDate}
+                  &nbsp;|&nbsp; EU Battery Regulation 2023/1542
+                  {manifest.assembly_record && " | DISASSEMBLY VERIFIED"}
+                </div>
+              </div>
+
               <PassportCard manifest={manifest} passportUrl={passportUrl} />
+
+              <div className="print-doc-footer">
+                ReVolt OS Battery Passport System
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                {passportUrl}
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                Printed: {printDate}
+              </div>
             </div>
           </div>
 
-          <div className="divider" style={{ margin: "0 8px" }} />
-
-          <div style={S.statusBar}>
-            <span>Passport loaded successfully.</span>
+          <div className="divider" style={{ margin: "0 8px" }} data-print="hide" />
+          <div style={S.statusBar} data-print="hide">
+            <span>Passport loaded.</span>
             <span style={{ fontFamily: "var(--font-mono)" }}>
-              {new Date(manifest.audit_timestamp).toLocaleString()}
+              {manifest.updated_at ? new Date(manifest.updated_at).toLocaleString() : ""}
             </span>
           </div>
 
         </div>
       </div>
-      <Taskbar active="passport" />
-    </div>
-  );
-}
 
-/* Taskbar -- shared bottom bar.
-   active prop highlights the current page button (pressed inset style). */
-function Taskbar({ active }) {
-  const navigate = useNavigate();
-  return (
-    <div style={S.taskbar}>
-      <div style={{ display: "flex", gap: 4 }}>
-        <button
-          className="aqua-btn"
-          style={active === "audit" ? { boxShadow: "var(--inset)" } : {}}
-          onClick={() => navigate("/audit")}
-        >
-          ReVolt OS
-        </button>
-      </div>
-      <div style={S.clock}>
-        {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+      <div style={S.taskbar} data-print="hide">
+        <div style={{ display: "flex", gap: 4 }}>
+          <button className="aqua-btn" onClick={() => navigate("/audit")}>ReVolt OS</button>
+        </div>
+        <div style={S.clock}>
+          {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </div>
       </div>
     </div>
   );

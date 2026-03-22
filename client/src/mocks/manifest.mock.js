@@ -1,62 +1,109 @@
-/* =============================================================================
-   mocks/manifest.mock.js
-   
-   Holds a static copy of a real audit result for frontend development.
-   This lets you build and test all three pages without the FastAPI server
-   running or Gemini being called.
-
-   HOW TO USE:
-     - USE_MOCK = true  --> AuditPage skips the real POST /api/audit call
-                           and navigates straight to PassportPage with this data.
-     - USE_MOCK = false --> AuditPage sends the real multipart form upload
-                           to the FastAPI server at localhost:8000.
-
-   TO SWITCH TO LIVE MODE:
-     Set USE_MOCK = false in this file. That's the only change needed.
-     AuditPage.jsx reads this flag at the top of submit().
-
-   NOTE on battery_id:
-     The real pipeline (audit.py) reads the battery sticker image via Gemini
-     vision and populates battery_id from what it can read off the label.
-     The mock below uses a clean BMW i3 example instead of the Coke can
-     that the test image happened to produce.
-   ============================================================================= */
+// =============================================================================
+// frontend/src/mocks/manifest.mock.js
+//
+// Static mock of a battery document for frontend development.
+// Matches the schema from backend/01_schema_and_seed.py exactly.
+//
+// CHANGES FROM PREVIOUS VERSION:
+//   - battery_id format: "RVX-2024-00001" (was "RV-2026-001")
+//   - status values now Title Case: "Certified", "Listed", "Disassembly Started"
+//     (was lowercase: "listed", "disassembly_completed")
+//   - manufacturer is now a nested object (was battery_id sub-object)
+//   - health_details replaces the flat fields (state_of_health_pct etc. are nested)
+//   - safety_workflow is the new state machine field (replaces assembly_record)
+//   - safety_risks replaces the flat thermal_stress_flag + risk_summary fields
+//
+// SCHEMA SOURCE: backend/01_schema_and_seed.py  create_collection_with_validation()
+//
+// FLIP TO LIVE:
+//   Set USE_MOCK = false once the backend is running.
+//   AuditPage.jsx POSTs to POST /api/batteries (Flask) or POST /api/audit (FastAPI).
+//   PassportPage.jsx fetches GET /api/batteries/:id/passport.
+// =============================================================================
 
 export const MOCK_MANIFEST = {
-  passport_id:                "RV-2026-001",
-  audit_timestamp:            "2026-03-21T00:00:00Z",
-  health_grade:               "B",
-  state_of_health_pct:        82,
-  remaining_useful_life_years: 4.2,
-  cycle_count:                412,
-  peak_temp_recorded_c:       54.1,
-  fast_charge_ratio_pct:      68,
-  thermal_stress_flag:        true,
-  recommended_config:         "4S2P - bypass cell block C",
-  risk_summary:
-    "Thermal excursion detected at high discharge rates (80A+). Peak temperature 54.1 degrees C exceeds nominal operating range.",
-  eu_compliant: true,
-  status:       "listed",
+  // --- Identity ---
+  battery_id: "RVX-2024-00001",
+  status:     "Certified",   // One of: Listed | Under Review | Certified | Sold | Disassembly Started
 
-  /* battery_id is populated by analyze_image() in audit.py.
-     It reads the physical battery sticker via Gemini vision.
-     Fields that cannot be read from the label default to "unknown" / 0. */
-  battery_id: {
-    manufacturer:       "BMW",
-    model:              "i3 Rex 2019",
-    chemistry:          "NMC",
-    rated_capacity_kwh: 42.2,
-    nominal_voltage_v:  355,
-    manufacture_year:   2019,
-    serial_number:      "BMW-NMC-2019-04963406",
+  // --- Manufacturer (populated by Gemini Vision in audit.py) ---
+  manufacturer: {
+    name:                 "CATL",
+    model:                "NMC811-72Ah",
+    chemistry:            "NMC",
+    nominal_voltage:      3.7,
+    nominal_capacity_kwh: 75.0,
+    manufacture_date:     "2021-03-15",
   },
 
-  /* openscad_code is NOT present in the mock yet.
-     It requires a third Gemini call in build_full_manifest() -- see audit.py.
-     When it exists, PassportCard.jsx renders it in the 3D Enclosure section.
-     Leave this field absent (undefined) to show the pending placeholder. */
-  // openscad_code: "// OpenSCAD goes here",
+  // --- Health (populated by Gemini telemetry audit in audit.py) ---
+  health_grade: "A",
+  health_details: {
+    state_of_health_pct:        91.2,
+    remaining_useful_life_years: 6.5,
+    total_cycles:               580,
+    peak_temp_recorded_c:       38.4,
+    avg_discharge_rate_c:       0.5,
+    physical_condition:         "Excellent -- no visible damage",
+    gemini_analysis_summary:    "High-quality NMC pack from temperate climate. Low cycle count with conservative discharge history. Ideal for residential solar storage.",
+    audit_timestamp:            "2026-03-21T00:00:00Z",
+  },
+
+  // --- Telemetry summary (stats from the CSV, not the raw rows) ---
+  telemetry_summary: {
+    voltage_min:          3.0,
+    voltage_max:          4.2,
+    voltage_mean:         3.72,
+    temp_min_c:           5.0,
+    temp_max_c:           38.4,
+    temp_mean_c:          22.1,
+    capacity_fade_pct:    8.8,
+    data_points_count:    5200,
+    discharge_curve_shape: "Linear",
+  },
+
+  // --- Safety risks (Gemini-detected, from both vision and CSV) ---
+  // Empty array = no risks detected for this battery.
+  // When risks exist, AssemblyPage shows them in the RISK ALERT panel.
+  // Each risk: { risk_type, severity, description, mitigation, detected_by }
+  safety_risks: [],
+
+  // --- Safety workflow (state machine, driven by AssemblyPage + backend) ---
+  // current_state progression:
+  //   Not Started -> Inspection -> Discharging -> Module Separation -> Reassembly -> Complete
+  // compliance_log is appended to each time the voice agent or technician confirms a step.
+  safety_workflow: {
+    current_state:  "Not Started",
+    technician_id:  null,
+    target_config:  "4S2P 48V Solar Stack",
+    started_at:     null,
+    completed_at:   null,
+    compliance_log: [],
+  },
+
+  // --- Audit manifest (the Battery Passport core document) ---
+  audit_manifest: {
+    version:         "1.0",
+    generated_by:    "Gemini (gemini-3-flash-preview)",
+    passport_id:     "RVX-2024-00001",
+    grade:           "A",
+    recommended_use: ["Residential solar storage", "Light EV conversion"],
+    warnings:        [],
+    eu_compliant:    true,
+    audit_timestamp: "2026-03-21T00:00:00Z",
+  },
+
+  // --- Listing (marketplace display) ---
+  listing: {
+    title:            "Premium 75kWh NMC Pack -- Grade A -- Low Cycles",
+    description:      "Verified CATL NMC811 pack from a gently-used Model 3. Only 580 cycles, 91% SOH.",
+    asking_price_usd: 8500.00,
+    seller_id:        "seller-001",
+  },
+
+  created_at: "2026-03-21T00:00:00Z",
+  updated_at: "2026-03-21T00:00:00Z",
 };
 
-/* Flip to false once the FastAPI server and Gemini pipeline are running. */
+// Flip to false once the backend is running and POST /api/audit is live.
 export const USE_MOCK = true;
