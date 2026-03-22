@@ -5,4 +5,4 @@ builder = "nixpacks"
 providers = ["python"]
 
 [deploy]
-startCommand = "gunicorn --chdir .scripts api_endpoints:app --bind 0.0.0.0:$PORT"
+startCommand = "gunicorn --chdir .scripts api_endpoints:app --bind 0.0.0.0:$PORT --timeout 120"
