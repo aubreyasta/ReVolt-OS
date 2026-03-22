@@ -346,6 +346,9 @@ export default function WorkspacePage() {
   const { state } = useLocation();
   const navigate = useNavigate();
   const manifest = state?.manifest;
+  
+  console.log("STATE:", state);        // 👈 add this
+  console.log("MANIFEST:", manifest);  // 👈 and this
 
   const [sel, setSel] = useState(null);
   const [leftW, setLeftW] = useState(null);   // passport width (px)
