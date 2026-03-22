@@ -615,8 +615,12 @@ def build_digital_twin(csv_path: str, image_path: str = None, seller_id: str = "
     embedding = generate_telemetry_embedding(csv_path)
 
     # --- Compare against failure state library via Vector Search ---
-    print(f"\n[5/6] Comparing against failure state library (MongoDB Vector Search)...")
-    failure_comparison = compare_against_failures(embedding)
+    if os.getenv("SKIP_VECTOR_SEARCH", "").lower() == "true":
+        print(f"\n[5/6] Skipping vector search (SKIP_VECTOR_SEARCH=true)")
+        failure_comparison = {"matches": [], "clear": True, "highest_threat": None, "highest_score": 0}
+    else:
+        print(f"\n[5/6] Comparing against failure state library (MongoDB Vector Search)...")
+        failure_comparison = compare_against_failures(embedding)
 
     # --- Combine into the Digital Twin ---
     all_risks      = audit_result.get("safety_risks", []) + photo_risks
