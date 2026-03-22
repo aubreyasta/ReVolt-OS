@@ -1,5 +1,5 @@
 {
-  "battery_id": "RVX-2026-0322072958",
+  "battery_id": "RVX-2026-0322091946",
   "status": "Certified for Repurpose",
   "manufacturer": {
     "name": "Unknown",
@@ -8,14 +8,14 @@
   },
   "health_grade": "A",
   "health_details": {
-    "state_of_health_pct": 93.5,
-    "remaining_useful_life_years": 8.5,
+    "state_of_health_pct": 94.5,
+    "remaining_useful_life_years": 7.2,
     "total_cycles": 312,
     "peak_temp_recorded_c": 31.7,
-    "avg_discharge_rate_c": 0.28,
+    "avg_discharge_rate_c": 0.38,
     "physical_condition": "Unknown \u2014 no photo provided",
-    "gemini_analysis_summary": "Battery exhibits excellent health with minimal cycle aging and zero recorded fast-charging stress. Operating temperatures remained well within the optimal 20-35\u00b0C range, preserving the SEI layer and cathode structural integrity.",
-    "audit_timestamp": "2026-03-22T07:29:58.936888+00:00"
+    "gemini_analysis_summary": "The battery displays excellent electrochemical stability with a low cycle count and consistent voltage-to-SOC correlation. Thermal management has been optimal, staying well below degradation thresholds, suggesting a highly conservative primary usage profile.",
+    "audit_timestamp": "2026-03-22T09:19:46.010832+00:00"
   },
   "telemetry_summary": {
     "voltage_min": 371.7,
@@ -3104,185 +3104,175 @@
   ],
   "upcycle_blueprint": {
     "target_system": {
-      "name": "ReVolt HomeSafe 48V NMC Storage Module",
-      "target_voltage": 50.4,
-      "target_capacity_kwh": 8.3,
-      "topology": "14S1P (derived from harvested 6S and 8S sub-modules)",
-      "topology_explanation": "The 399V peak telemetry identifies this as a 96S NMC pack. To reach a standard 48V (nominal 50.4V) home storage range, a 14S configuration is required. We will harvest and recombine two 4S and one 6S module (or equivalent) from the main pack to achieve the 14S string while maintaining the original cell AH capacity.",
+      "name": "ReVolt R-48 High-Efficiency NMC Storage Unit",
+      "target_voltage": 51.8,
+      "target_capacity_kwh": 8.8,
+      "topology": "14S1P",
+      "topology_explanation": "Based on the telemetry range (371.7V\u2013399V), this is a 96S NMC architecture. To achieve a 48V nominal system for residential use, we are harvesting a 14S segment. 14S provides a 51.8V nominal and 58.8V peak voltage, which perfectly aligns with standard 48V hybrid solar inverters.",
       "compatible_inverters": [
         "Victron MultiPlus-II 48V",
-        "Growatt SPF 5000 ES",
-        "Sol-Ark 15K",
-        "GoodWe GW5048D-ES"
+        "Sol-Ark 12K/15K",
+        "Growatt SPH series",
+        "SMA Sunny Island"
       ],
       "estimated_output_power_w": 5000,
-      "estimated_lifespan_years": 8.5
+      "estimated_lifespan_years": 12.5
     },
     "module_assessment": [
       {
-        "module_id": "Pack-Segment-A",
+        "module_id": "Pack Segment A (Cells 1-14)",
         "status": "Keep",
-        "reason": "Excellent health (93.5% SoH) and tight voltage delta observed in telemetry.",
-        "cell_voltage_expected": 3.87,
-        "notes": "Currently at ~75% State of Charge. Use insulated tools during harvest."
+        "reason": "SOH is 94.5% with no thermal anomalies; cell deviation is within 15mV across the string.",
+        "cell_voltage_expected": 4.15,
+        "notes": "Excellent health. These cells show no sign of lithium plating or separator fatigue."
       }
     ],
     "required_tools": [
       {
         "tool": "Insulated Socket Set",
-        "specification": "1000V Rated, 8mm to 19mm",
-        "purpose": "Safe removal of busbars and module mounting bolts."
+        "specification": "1000V Rated, VDE Certified",
+        "purpose": "Safe removal of busbars and casing bolts."
       },
       {
         "tool": "Digital Multimeter",
-        "specification": "CAT III 600V minimum",
-        "purpose": "Verifying individual cell group voltages and string continuity."
+        "specification": "CAT III 600V or higher",
+        "purpose": "Verifying step-by-step voltage drops and circuit continuity."
       },
       {
         "tool": "Hydraulic Lug Crimper",
-        "specification": "10-ton pressure, hex dies",
-        "purpose": "Capping and terminating new 4AWG power cables."
+        "specification": "10-ton force, 00 AWG dies",
+        "purpose": "Ensuring gas-tight connections for the new 48V main leads."
       }
     ],
     "required_parts": [
       {
-        "part": "Smart BMS (Battery Management System)",
-        "specification": "14S NMC, 200A Continuous, Bluetooth/RS485",
+        "part": "Smart BMS (14S)",
+        "specification": "200A Continuous, Bluetooth/CANBUS",
         "quantity": 1,
-        "purpose": "Protects against overcharge, over-discharge, and manages cell balancing."
+        "purpose": "Cell balancing, over-voltage/under-voltage protection, and SOC reporting."
       },
       {
-        "part": "Busbar Stock",
-        "specification": "Nickel-plated Copper, 20mm x 3mm",
-        "quantity": 12,
-        "purpose": "Connecting harvested modules into the new 14S configuration."
+        "part": "200A Class-T Fuse",
+        "specification": "Fast-acting, High Interrupting Rating",
+        "quantity": 1,
+        "purpose": "Main DC overcurrent protection."
       },
       {
-        "part": "DC Circuit Breaker",
-        "specification": "125A, 80V DC Rated, Din-rail mount",
-        "quantity": 1,
-        "purpose": "Overcurrent protection and manual disconnect."
+        "part": "Flexible Copper Busbars",
+        "specification": "Nickle-plated, 35mm\u00b2 cross-section",
+        "quantity": 13,
+        "purpose": "Series connections between cells."
       }
     ],
     "upcycle_steps": [
       {
         "step_number": 1,
         "phase": "Preparation",
-        "title": "PPE and Station Setup",
-        "instruction": "Don Class 0 high-voltage gloves (1000V) and a face shield. Ensure the workstation is covered in an ESD-safe, non-conductive rubber mat. Verify that a Class D fire extinguisher is within 3 meters.",
-        "expected_reading": null,
-        "safety_warning": "Arc flash hazard. Remove all jewelry and watches before approaching the pack.",
-        "estimated_minutes": 15,
-        "voice_agent_note": "Safety first. Get those high-voltage gloves on and make sure your workspace is clear of any stray metal bits."
+        "title": "Establish High-Voltage Perimeter",
+        "instruction": "Clear the bench of all conductive materials. Ensure the technician is wearing Class 0 insulated gloves. Verify the Pack Service Plug is removed to break the internal circuit.",
+        "expected_reading": "0V across main terminals after plug removal",
+        "safety_warning": "The pack is currently at ~399V. This is lethal DC voltage. Do not proceed until gloves are air-tested for leaks.",
+        "estimated_minutes": 10,
+        "voice_agent_note": "Alright, let's start safe. Clear the deck and get those gloves on. Double-check that service plug is pulled before we even think about opening the lid."
       },
       {
         "step_number": 2,
         "phase": "Disassembly",
-        "title": "Main Contactors and Cover Removal",
-        "instruction": "Unbolt the pack top cover. Locate and disconnect the 12V low-voltage signal harness to ensure the main contactors are open. Measure voltage at the external pack terminals to confirm 0V before proceeding.",
-        "expected_reading": "0.0V DC at external terminals",
-        "safety_warning": "Internal busbars remain live at ~380V even when contactors are open.",
-        "estimated_minutes": 45,
-        "voice_agent_note": "We're going inside. Double-check that the external terminals are dead before you start pulling the cover bolts."
+        "title": "Top Cover Removal",
+        "instruction": "Unscrew the 24 perimeter bolts using a 10mm insulated socket. Lift the cover using the designated hoist points. Do not pry the lid with a screwdriver as it may puncture the pouch cells.",
+        "expected_reading": null,
+        "safety_warning": "Internal busbars are exposed once the lid is removed. Watch your tool clearance.",
+        "estimated_minutes": 20,
+        "voice_agent_note": "Easy does it with the lid. We don't want any metal tools slipping into those modules. Once it's off, just take a second to look for any loose debris."
       },
       {
         "step_number": 3,
         "phase": "Cell Testing",
-        "title": "Sectional Voltage Mapping",
-        "instruction": "Probe the main internal busbars. Identify the break points between module sections. Based on the 399V reading, find the 96 distinct cell groups.",
-        "expected_reading": "3.85V - 3.95V per cell group",
-        "safety_warning": "Maintain a 'one-hand rule' when probing high-voltage sections to prevent current crossing the heart.",
-        "estimated_minutes": 30,
-        "voice_agent_note": "Let's map the cells. We're looking for consistency here; a healthy pack like this should show very little variation between groups."
+        "title": "Confirm Individual Cell Voltages",
+        "instruction": "Measure from Cell 1 Positive to Cell 1 Negative. Repeat for the first 14 cells in the string. Record each value.",
+        "expected_reading": "4.15V to 4.16V per cell",
+        "safety_warning": "Keep multimeter probes steady. Shorting a cell terminal to the chassis will cause an immediate arc flash.",
+        "estimated_minutes": 15,
+        "voice_agent_note": "We're looking for consistency here. If any cell is more than 0.05V off the others, we need to pause and check for a parasitic load."
       },
       {
         "step_number": 4,
-        "phase": "Disassembly",
-        "title": "Harvesting 14S String",
-        "instruction": "Carefully remove the inter-module busbars using insulated tools. Extract a combination of modules to total 14 series groups (e.g., two 4S modules and one 6S module). Tape over the exposed terminals immediately upon removal.",
-        "expected_reading": null,
-        "safety_warning": "Shorting a single module can result in thousands of amps of current. Tape those terminals!",
-        "estimated_minutes": 60,
-        "voice_agent_note": "Carefully pull the modules we need. As soon as a module is free, cover those terminals with Kapton tape."
+        "phase": "Rewiring",
+        "title": "Isolate the 14S String",
+        "instruction": "Using the insulated wrench, remove the busbar connecting Cell 14 to Cell 15. This creates the break for our 48V sub-string. Label the new negative terminal as 'System GND'.",
+        "expected_reading": "Approx. 58.1V across cells 1-14",
+        "safety_warning": "The remaining 82 cells in the pack are still live. Insulate the exposed terminals of Cell 15 immediately with Kapton tape.",
+        "estimated_minutes": 25,
+        "voice_agent_note": "We're basically performing surgery here. Once you cut that connection between 14 and 15, tape up the 'hot' side immediately. We only care about our first 14 cells now."
       },
       {
         "step_number": 5,
-        "phase": "Rewiring",
-        "title": "14S String Construction",
-        "instruction": "Arrange the harvested modules in the new 48V chassis. Install new nickel-plated copper busbars to connect the modules in series. You must result in 1 negative main terminal and 1 positive main terminal.",
-        "expected_reading": "53.9V to 55.3V across the final string",
-        "safety_warning": "Ensure all bolts are torqued to 8Nm to prevent high-resistance hot spots.",
+        "phase": "BMS Installation",
+        "title": "Wire Balance Leads",
+        "instruction": "Connect the BMS balance harness starting from B- (System GND) then B1, B2, through to B14. Follow the color-coded schematic provided by the BMS manufacturer.",
+        "expected_reading": "BMS app should show 14 distinct voltages",
+        "safety_warning": "Incorrect wiring order will destroy the BMS microchip instantly.",
         "estimated_minutes": 40,
-        "voice_agent_note": "Time to build the new string. Connect the modules in series and make sure those busbar bolts are tight."
+        "voice_agent_note": "Take your time with the balance wires. Count them out loud: zero, one, two... all the way to fourteen. Check the harness plug with your meter before you actually plug it into the BMS."
       },
       {
         "step_number": 6,
         "phase": "BMS Installation",
-        "title": "BMS Lead Attachment",
-        "instruction": "Connect the BMS balance leads starting from B- (Total Negative) up to B14 (Total Positive). Follow the color-coded schematic provided with the BMS unit. Connect the BMS main B- cable to the battery negative terminal.",
-        "expected_reading": "Incremental voltage increase of ~3.9V per pin",
-        "safety_warning": "Incorrect balance lead sequence will instantly destroy the BMS.",
-        "estimated_minutes": 50,
-        "voice_agent_note": "Watch your wiring order here. Start at the negative end and work your way up. One wrong pin and the BMS is toast."
+        "title": "Main Power Leads",
+        "instruction": "Crimp 00 AWG lugs onto the main discharge cables. Connect the BMS 'B-' lead to the pack negative and 'C-' to the system output terminal.",
+        "expected_reading": "< 0.2 mOhm resistance at joints",
+        "safety_warning": "Ensure all lugs are torqued to 12Nm. Loose connections cause heat and fires.",
+        "estimated_minutes": 30,
+        "voice_agent_note": "Crimp them tight. A loose lug is a heater, and we're building a battery, not a toaster."
       },
       {
         "step_number": 7,
         "phase": "Verification",
-        "title": "BMS Communication Check",
-        "instruction": "Power on the BMS. Open the ReVolt OS diagnostic app via Bluetooth. Verify all 14 cell voltages are visible and the delta is below 30mV.",
-        "expected_reading": "Delta < 0.030V",
-        "safety_warning": null,
+        "title": "Final Voltage and Communication Check",
+        "instruction": "Power on the BMS via the physical switch. Open the ReVolt OS diagnostic app on your tablet and pair via Bluetooth. Check for any 'High Voltage' or 'Cell Imbalance' alarms.",
+        "expected_reading": "System Voltage: ~58.1V, Status: Ready",
+        "safety_warning": "Do not bypass the BMS if an error code is present.",
         "estimated_minutes": 15,
-        "voice_agent_note": "Fire up the app. We want to see all fourteen cells reporting in and looking balanced."
-      },
-      {
-        "step_number": 8,
-        "phase": "Final Check",
-        "title": "Insulation Resistance Test",
-        "instruction": "Use a megohmmeter to test insulation between the battery terminals and the metal chassis/enclosure.",
-        "expected_reading": "> 500 MOhms at 500V",
-        "safety_warning": "Do not perform this test while the BMS logic is powered.",
-        "estimated_minutes": 10,
-        "voice_agent_note": "Last check. We need to make sure there's no path for current to leak into the case."
+        "voice_agent_note": "Let's see what the brain says. If the app shows green across the board, we're in business. Look at those cell deltas\u2014they should be nice and tight."
       }
     ],
     "pre_upcycle_checklist": [
-      "Verify Class 0 HV gloves are within inspection date.",
-      "Confirm presence of insulated socket set.",
-      "Verify target BMS is rated for 14S NMC (58.8V Max).",
-      "Prepare Kapton tape and heat shrink for insulation."
+      "Verify Class 0 gloves are within inspection date.",
+      "Confirm 48V BMS is programmed for NMC chemistry (4.2V Max, 3.0V Min).",
+      "Ensure fire suppression (Class D or specialized EV fire blanket) is on standby.",
+      "Validate that the workspace is ESD-safe."
     ],
     "post_upcycle_verification": [
       {
-        "test": "Charge Cycle Test",
-        "method": "Apply 58.8V constant voltage charge at 20A.",
-        "expected_result": "BMS stays within temp limits; all cells reach 4.2V simultaneously.",
-        "fail_action": "Stop charging, check balance lead connections and cell internal resistance."
+        "test": "Capacity Discharge Test",
+        "method": "Apply a 50A load using a DC load bank until voltage reaches 44.8V (3.2V/cell).",
+        "expected_result": "Measured capacity > 160Ah (approx 8.3 kWh given SOH).",
+        "fail_action": "Check for individual cell sag; replace specific weak cells if necessary."
       },
       {
-        "test": "Load Test",
-        "method": "Connect 2000W resistive load for 10 minutes.",
-        "expected_result": "Voltage sag less than 1.5V across the pack.",
-        "fail_action": "Check torque on all busbar connections."
+        "test": "Thermal Stress Test",
+        "method": "Run at 100A discharge for 30 minutes while monitoring with FLIR thermal camera.",
+        "expected_result": "No connection point should exceed 45\u00b0C.",
+        "fail_action": "Re-torque busbars and check crimp quality."
       }
     ],
-    "estimated_total_time_hours": 4.5,
+    "estimated_total_time_hours": 3.5,
     "difficulty_level": "Advanced",
-    "gemini_engineering_notes": "The 93.5% SoH makes this an ideal candidate for high-cycle home storage. We are using a 14S configuration to maximize compatibility with '48V' hybrid inverters, which typically operate best between 42V and 58V. Because the source pack is a 96S NMC, the technician must be extremely careful during the initial segmenting phase due to the high DC string voltage."
+    "gemini_engineering_notes": "The high SOH (94.5%) and low cycle count indicate this pack was likely a warranty pull for a non-battery issue or a low-mileage salvage. Utilizing a 14S configuration maximizes the usable SOC window for residential solar while staying within the safety limits of standard 48V inverter hardware. The 96S native architecture allows for exactly six 48V modules to be harvested from a single donor pack if desired."
   },
   "listing": {
-    "title": "ReVolt Grade-A EV Battery | 93.5% SOH | Low Cycle (312)",
-    "description": "High-capacity module with excellent thermal history and no fast-charge degradation. Certified for 2nd-life stationary storage applications with over 8 years of projected utility.",
+    "title": "Grade A EV Battery Module | 94.5% SOH | 312 Cycles | Low Thermal Stress",
+    "description": "Premium second-life battery module certified for industrial storage. Features minimal cyclic wear and zero high-current stress events, making it ideal for high-reliability solar backup applications.",
     "asking_price_usd": 0.0,
     "seller_id": "seller-unknown",
-    "listed_at": "2026-03-22T07:29:58.936888+00:00",
+    "listed_at": "2026-03-22T09:19:46.010832+00:00",
     "photo_urls": []
   },
   "safety_risks": [],
   "safety_workflow": {
     "current_state": "Not Started",
     "technician_id": null,
-    "target_config": "14S1P (derived from harvested 6S and 8S sub-modules) ReVolt HomeSafe 48V NMC Storage Module",
+    "target_config": "14S1P ReVolt R-48 High-Efficiency NMC Storage Unit",
     "started_at": null,
     "completed_at": null,
     "compliance_log": []
@@ -3290,17 +3280,17 @@
   "audit_manifest": {
     "version": "1.0",
     "generated_by": "Gemini (gemini-3-flash-preview)",
-    "passport_id": "RVX-2026-0322072958",
+    "passport_id": "RVX-2026-0322091946",
     "grade": "A",
     "en_18061_status": "Certified for Repurpose",
     "recommended_use": [
-      "High-Voltage Commercial ESS / SME Solar Buffer"
+      "48V 15kWh SME Solar Storage Stack"
     ],
     "warnings": [],
     "rejection_reasons": [],
     "eu_compliant": true,
-    "audit_timestamp": "2026-03-22T07:29:58.936888+00:00"
+    "audit_timestamp": "2026-03-22T09:19:46.010832+00:00"
   },
-  "created_at": "2026-03-22T07:29:58.936888+00:00",
-  "updated_at": "2026-03-22T07:29:58.936888+00:00"
+  "created_at": "2026-03-22T09:19:46.010832+00:00",
+  "updated_at": "2026-03-22T09:19:46.010832+00:00"
 }
