@@ -127,6 +127,12 @@ def analyze_image(image_path: str) -> dict:
             """You are a battery identification and safety inspection AI for ReVolt OS.
 Analyze this battery image and return ONLY valid JSON with no explanation.
 
+Look for:
+1. Manufacturer info from any stickers, labels, or markings
+2. Physical condition — check for swelling, bulging, corrosion, dents, leaks, burn marks
+3. Signs of lithium plating — white/gray metallic deposits near terminals, uneven cell swelling, discoloration patterns suggesting internal dendrite growth
+4. Terminal/connector types visible
+
 Return this exact JSON structure:
 {
   "manufacturer": {
@@ -149,6 +155,7 @@ Return this exact JSON structure:
   ]
 }
 
+If you cannot identify the battery (e.g. it's not a battery), still return the structure with 'Unknown' values and note what you see in physical_observations.
 If you see NO safety concerns, return an empty array for safety_concerns_from_photo."""
         ]
     )
@@ -186,10 +193,18 @@ Analyze this battery telemetry data and pre-computed statistics. Return ONLY val
 
 === SAFETY RISK DETECTION ===
 Flag any of these as safety risks:
-- Peak temperature above 45C = Thermal risk
-- Current spikes above 60A = Electrical stress risk
+- Peak temperature above 45C = Thermal risk (thermal abuse)
+- Peak temperature below -10C during charging = Thermal risk (lithium plating conditions)
+- Current spikes above 60A = Electrical stress risk  
 - Voltage dropping below 300V = Electrical risk (deep discharge)
 - SOC dropping more than 40% in one session = High-rate discharge risk
+- Rapid voltage drop at high SOC (voltage sag) = Electrical risk (internal resistance increase, possible lithium plating)
+- Charging at high C-rates (above 1C) when temperature is below 10C = Chemical risk (lithium plating)
+- Sudden capacity fade above 5% between cycles = Structural risk (electrode delamination)
+
+IMPORTANT: For each risk you detect, explain the electrochemical mechanism. For example:
+- "Lithium plating detected: charging at 0.8C below 5C causes metallic lithium deposits on the anode"
+- "Thermal abuse: sustained temps above 50C accelerate SEI layer growth and electrolyte decomposition"
 
 Return this exact JSON structure:
 {{
